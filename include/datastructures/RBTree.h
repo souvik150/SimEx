@@ -22,8 +22,8 @@ private:
         Node* left;
         Node* right;
 
-        Node(const Key& k, const Value& v, Color c, Node* p)
-            : key(k), value(v), color(c), parent(p), left(nullptr), right(nullptr) {}
+        Node(const Key& k, Value&& v, Color c, Node* p)
+            : key(k), value(std::move(v)), color(c), parent(p), left(nullptr), right(nullptr) {}
     };
 
     Node* root_ = nullptr;
@@ -41,7 +41,7 @@ public:
     //  PUBLIC API
     // ==========================================================
 
-    bool insert(const Key& key, const Value& val) {
+    bool insert(const Key& key, Value&& val) {
         Node* parent = nullptr;
         Node* cur = root_;
 
@@ -52,12 +52,12 @@ public:
             else if (comp_(cur->key, key))
                 cur = cur->right;
             else {
-                cur->value = val;
+                cur->value = std::move(val);
                 return false;
             }
         }
 
-        Node* node = new Node(key, val, Color::RED, parent);
+        Node* node = new Node(key, std::move(val), Color::RED, parent);
         if (!parent)
             root_ = node;
         else if (comp_(key, parent->key))
