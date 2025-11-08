@@ -2,3 +2,4 @@
 .idea
 *.csv
 *.db
+cmake-build-debug
