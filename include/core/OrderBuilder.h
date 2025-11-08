@@ -5,7 +5,6 @@
 #ifndef ORDERMATCHINGSYSTEM_ORDERBUILDER_H
 #define ORDERMATCHINGSYSTEM_ORDERBUILDER_H
 #include <cstdint>
-
 #include "Order.h"
 
 class OrderBuilder {

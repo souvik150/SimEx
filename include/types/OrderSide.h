@@ -1,0 +1,14 @@
+//
+// Created by souvik on 11/8/25.
+//
+
+#ifndef ORDERMATCHINGSYSTEM_ORDERSIDE_H
+#define ORDERMATCHINGSYSTEM_ORDERSIDE_H
+
+enum class Side {
+    INVALID,
+    BUY,
+    SELL
+};
+
+#endif //ORDERMATCHINGSYSTEM_ORDERSIDE_H

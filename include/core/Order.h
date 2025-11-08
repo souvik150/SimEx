@@ -4,25 +4,25 @@
 
 #ifndef SIMEX_ORDER_H
 #define SIMEX_ORDER_H
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 
-enum class Side {
-    INVALID,
-    BUY,
-    SELL
-};
+#include "types/AppTypes.h"
+#include "types/OrderSide.h"
 
 class OrderBuilder;
 
 struct Order {
     friend class OrderBuilder;
 private:
-    uint64_t order_id_;
+    OrderId order_id_;
     Side side_;
-    int64_t price_;
-    uint32_t quantity_;
-    uint64_t timestamp_;
+    Price price_;
+    Qty quantity_;
+    Qty filled_quantity_;
+    uint32_t user_id_;
+    HrtTime timestamp_;
 
     Order(const uint64_t id, const Side s, const int64_t p, const uint32_t q, const uint64_t ts)
         : order_id_(id), side_(s), price_(p), quantity_(q), timestamp_(ts) {}
@@ -40,11 +40,25 @@ public:
     Order* operator==(Order&&) noexcept = delete;
 
     // accessors
-    uint64_t orderId() const { return order_id_; }
+    OrderId orderId() const { return order_id_; }
     Side side() const { return side_; }
-    int64_t price() const { return price_; }
-    uint32_t quantity() const { return quantity_; }
-    uint64_t timestamp() const { return timestamp_; }
+    Price price() const { return price_; }
+    Qty quantity() const { return quantity_; }
+    HrtTime timestamp() const { return timestamp_; }
+
+    bool modifyQty(const Qty newOrderQty) {
+        if (const uint32_t remainingQty = quantity_ - filled_quantity_; newOrderQty < remainingQty) {
+            return false;
+        }
+        quantity_ = newOrderQty;
+        timestamp_ = std::chrono::high_resolution_clock::now();
+        return true;
+    }
+
+    void modifyPrice(const Price newPrice) {
+        price_ = newPrice;
+        timestamp_ = std::chrono::high_resolution_clock::now();
+    }
 
     void print() const {
         std::cout << "Order{id=" << order_id_
