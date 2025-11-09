@@ -1,8 +1,8 @@
 #pragma once
-#include <memory>
 #include <functional>
-#include <iostream>
+#include <memory>
 
+#include "utils/Logger.h"
 /**
  * @brief Generic header-only Red-Black Tree.
  *        Supports both ascending and descending order via comparator.
@@ -176,7 +176,7 @@ private:
     void printInOrder(Node* n) const {
         if (!n) return;
         printInOrder(n->left);
-        std::cout << n->key << " ";
+        logging::logger().info("{}", n->key);
         printInOrder(n->right);
     }
 

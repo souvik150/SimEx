@@ -4,3 +4,4 @@
 *.db
 cmake-build-debug
 build/
+external/

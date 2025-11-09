@@ -4,5 +4,8 @@ add_library(strategies ${STRATEGY_SOURCES})
 
 target_include_directories(strategies
         PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
-)
+        ${CMAKE_SOURCE_DIR}/include)
+
+target_link_libraries(strategies
+        PUBLIC
+        spdlog::spdlog)

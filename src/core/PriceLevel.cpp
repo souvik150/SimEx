@@ -4,6 +4,10 @@
 
 #include "core/PriceLevel.h"
 
+#include <sstream>
+
+#include "utils/Logger.h"
+
 PriceLevel::PriceLevel(PriceLevel&& other) noexcept {
     head_ = other.head_;
     tail_ = other.tail_;
@@ -119,20 +123,22 @@ bool PriceLevel::empty() const { return !head_; }
 Qty PriceLevel::openQty() const { return open_qty_; }
 
 void PriceLevel::print() const {
+    std::ostringstream out;
     const Node* n = head_;
-    std::cout << "[";
+    out << "[";
     while (n) {
-        std::cout << n->order->orderId() << "(" << n->order->quantity() << ")";
-        if (n->next) std::cout << " -> ";
+        out << n->order->orderId() << "(" << n->order->quantity() << ")";
+        if (n->next) out << " -> ";
         n = n->next;
     }
-    std::cout << "]";
+    out << "]";
+    logging::logger().info(out.str());
 }
 
 void PriceLevel::clear() {
-    const Node* n = head_;
+    Node* n = head_;
     while (n) {
-        const Node* tmp = n->next;
+        Node* tmp = n->next;
         delete n;
         n = tmp;
     }

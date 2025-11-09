@@ -14,6 +14,8 @@ private:
     Price price_;
     Qty quantity_;
     HrtTime timestamp_;
+    OrderType order_type_ = OrderType::LIMIT;
+    Qty display_quantity_ = 0;
 
 public:
     OrderBuilder& setOrderId(OrderId id) {
@@ -41,11 +43,21 @@ public:
         return *this;
     }
 
+    OrderBuilder& setOrderType(OrderType type) {
+        order_type_ = type;
+        return *this;
+    }
+
+    OrderBuilder& setDisplayQuantity(Qty displayQty) {
+        display_quantity_ = displayQty;
+        return *this;
+    }
+
     [[nodiscard]] std::unique_ptr<Order> build() {
         // if (!order_id_ || side_== Side::INVALID || !price_ || !quantity_)
         //     throw std::runtime_error("Missing required order fields");
 
-        return std::unique_ptr<Order>(new Order(order_id_, side_, price_, quantity_, timestamp_));
+        return std::unique_ptr<Order>(new Order(order_id_, side_, price_, quantity_, timestamp_, order_type_, display_quantity_));
     }
 };
 

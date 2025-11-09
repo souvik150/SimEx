@@ -1,63 +1,56 @@
-# ──────────────────────────────────────────────
-# User Configuration
-# ──────────────────────────────────────────────
 BUILD_DIR := build
-TARGET := order_matching_system
+BIN_DIR := $(BUILD_DIR)/bin
+TEST_DIR := $(BUILD_DIR)/tests
+TARGET := $(BIN_DIR)/order_matching_system
+TEST_TARGET := $(TEST_DIR)/order_book_tests
 
-# ──────────────────────────────────────────────
-# Main Targets
-# ──────────────────────────────────────────────
-
-# Default target: configure + build (Release)
 all: configure build
 
-# Configure Release build
 configure:
-	@echo "⚙️  Configuring CMake project (Release)..."
+	@echo "Configuring CMake project (Release)..."
 	@cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
 
-# Configure Debug build
 configure-debug:
-	@echo "⚙️  Configuring CMake project (Debug)..."
+	@echo "Configuring CMake project (Debug)..."
 	@cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug
 
-# Build Release target
 build:
-	@echo "🔧 Building target $(TARGET) (Release)..."
-	@cmake --build $(BUILD_DIR) --target $(TARGET) -j
+	@echo "Building (Release)..."
+	@cmake --build $(BUILD_DIR) -j
 
-# Build Debug target
 build-debug:
-	@echo "🧰 Configuring and building target $(TARGET) (Debug)..."
+	@echo "Configuring and building target $(TARGET) (Debug)..."
 	@cmake -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug
 	@cmake --build $(BUILD_DIR) --target $(TARGET) -j
 
-# Run the Release binary
 run: build
-	@echo "🚀 Running $(TARGET) (Release)..."
-	@$(BUILD_DIR)/$(TARGET)
+	@echo "Running $(TARGET) (Release)..."
+	@$(TARGET)
 
-# Run the Debug binary (with gdb if available)
 run-debug: build-debug
-	@echo "🐞 Running $(TARGET) (Debug)..."
+	@echo "Running $(TARGET) (Debug)..."
 	@if command -v gdb >/dev/null 2>&1; then \
-		gdb -q $(BUILD_DIR)/$(TARGET); \
+		gdb -q $(TARGET); \
 	else \
-		$(BUILD_DIR)/$(TARGET); \
+		$(TARGET); \
 	fi
 
-# Clean the build directory
+test: build
+	@echo "Building tests..."
+	@cmake --build $(BUILD_DIR) --target order_book_tests -j
+
+run-test: test
+	@echo "Running tests..."
+	@$(TEST_TARGET)
+
 clean:
-	@echo "🧹 Cleaning build directory..."
+	@echo "Cleaning build directory..."
 	@rm -rf $(BUILD_DIR)
 
-# Full rebuild (clean + reconfigure + build)
 rebuild: clean all
 
-# Full debug rebuild
 rebuild-debug: clean configure-debug build-debug
 
-# Show available targets
 help:
 	@echo "Available targets:"
 	@echo "  make              - Configure and build Release (default)"

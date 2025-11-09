@@ -4,7 +4,16 @@
 
 #include "core/OrderBook.h"
 
-#include "core/OrderBuilder.h"
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
+
+#include "strategies/FillOrKillStrategy.h"
+#include "strategies/IcebergStrategy.h"
+#include "strategies/ImmediateOrCancelStrategy.h"
+#include "strategies/MarketStrategy.h"
+#include "strategies/PriceTimeStrategy.h"
+#include "utils/Logger.h"
 
 #define COLOR_RESET   "\033[0m"
 #define COLOR_RED     "\033[31m"
@@ -12,45 +21,41 @@
 #define COLOR_BOLD    "\033[1m"
 #define COLOR_DIM     "\033[2m"
 
-OrderBook::OrderBook() = default;
+OrderBook::OrderBook()
+    : context_(*this) {
+    strategies_[OrderType::LIMIT] = std::make_unique<PriceTimeStrategy>();
+    strategies_[OrderType::MARKET] = std::make_unique<MarketStrategy>();
+    strategies_[OrderType::IOC] = std::make_unique<ImmediateOrCancelStrategy>();
+    strategies_[OrderType::FOK] = std::make_unique<FillOrKillStrategy>();
+    strategies_[OrderType::ICEBERG] = std::make_unique<IcebergStrategy>();
+
+    trade_listener_ = [](const TradeEvent& event) {
+        logging::logger().info(
+            "TRADE: {} matched with {} @ {} for {} qty",
+            (event.aggressorSide == Side::BUY ? "BUY" : "SELL"),
+            (event.restingSide == Side::BUY ? "BUY" : "SELL"),
+            event.price,
+            event.quantity);
+    };
+}
 
 void OrderBook::addOrder(std::unique_ptr<Order> order) {
-    Price px = order->price();
-    Side side = order->side();
-    OrderId orderId = order->orderId();
+    if (!order)
+        return;
 
-    if (side == Side::BUY) {
-        auto bestAsk = asks_.best();
-        if (bestAsk && px >= bestAsk->headOrder()->price()) {
-            match(std::move(order), *bestAsk, Side::BUY);
-            return;
-        }
-
-        if (auto* level = bids_.find(px); !level) {
-            PriceLevel pl;
-            pl.addOrder(std::move(order));
-            bids_.insert(px, std::move(pl));
-        } else {
-            level->addOrder(std::move(order));
-        }
-        order_index_[orderId] = {Side::BUY, px};
-    } else {
-        auto bestBid = bids_.best();
-        if (bestBid && px <= bestBid->headOrder()->price()) {
-            match(std::move(order), *bestBid, Side::SELL);
-            return;
-        }
-
-        auto* level = asks_.find(px);
-        if (!level) {
-            PriceLevel pl;
-            pl.addOrder(std::move(order));
-            asks_.insert(px, std::move(pl));
-        } else {
-            level->addOrder(std::move(order));
-        }
-        order_index_[orderId] = {Side::SELL, px};
+    if (auto* strategy = strategyFor(order->type())) {
+        strategy->execute(std::move(order), context_);
     }
+}
+
+void OrderBook::setMatchingStrategy(OrderType type, std::unique_ptr<MatchingStrategy> strategy) {
+    if (strategy) {
+        strategies_[type] = std::move(strategy);
+    }
+}
+
+void OrderBook::setTradeListener(TradeListener listener) {
+    trade_listener_ = std::move(listener);
 }
 
 bool OrderBook::cancelOrder(uint64_t orderId) {
@@ -79,7 +84,7 @@ bool OrderBook::cancelOrder(uint64_t orderId) {
 void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
     auto it = order_index_.find(orderId);
     if (it == order_index_.end()) {
-        std::cerr << "Modify failed: order not found\n";
+        logging::logger().warn("Modify failed: order {} not found", orderId);
         return;
     }
 
@@ -102,16 +107,12 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
                     bids_.erase(ref.price);
                 order_index_.erase(orderId);
 
-                auto newOrder = OrderBuilder()
-                    .setOrderId(oldOrder->orderId())
-                    .setSide(oldOrder->side())
-                    .setPrice(newPrice)
-                    .setQuantity(oldOrder->pending_quantity())
-                    .setTimestamp(std::chrono::high_resolution_clock::now())
-                    .build();
+                if (newQty != oldOrder->quantity())
+                    oldOrder->modifyQty(newQty);
+                if (newPrice != oldOrder->price())
+                    oldOrder->modifyPrice(newPrice);
 
-                addOrder(std::move(newOrder));
-                order_index_[orderId] = {Side::BUY, newPrice};
+                addOrder(std::move(oldOrder));
                 return;
             }
 
@@ -136,16 +137,12 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
                     asks_.erase(ref.price);
                 order_index_.erase(orderId);
 
-                auto newOrder = OrderBuilder()
-                    .setOrderId(oldOrder->orderId())
-                    .setSide(oldOrder->side())
-                    .setPrice(newPrice)
-                    .setQuantity(oldOrder->pending_quantity())
-                    .setTimestamp(std::chrono::high_resolution_clock::now())
-                    .build();
+                if (newQty != oldOrder->quantity())
+                    oldOrder->modifyQty(newQty);
+                if (newPrice != oldOrder->price())
+                    oldOrder->modifyPrice(newPrice);
 
-                addOrder(std::move(newOrder));
-                order_index_[orderId] = {Side::SELL, newPrice};
+                addOrder(std::move(oldOrder));
                 return;
             }
 
@@ -155,73 +152,111 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
     }
 }
 
-void OrderBook::match(std::unique_ptr<Order> incoming, PriceLevel& oppositeLevel, Side incomingSide) {
-    while (!oppositeLevel.empty() && incoming->pending_quantity() > 0) {
-        auto headOrder = oppositeLevel.headOrder();
-        if (!headOrder) break;
+PriceLevel* OrderBook::BookContext::bestLevel(Side side) {
+    if (side == Side::BUY)
+        return book_.bids_.best();
+    if (side == Side::SELL)
+        return book_.asks_.best();
+    return nullptr;
+}
 
-        bool matchPossible = (incomingSide == Side::BUY)
-            ? incoming->price() >= headOrder->price()
-            : incoming->price() <= headOrder->price();
+void OrderBook::BookContext::restOrder(std::unique_ptr<Order> order) {
+    if (!order)
+        return;
 
-        if (!matchPossible) break;
+    const Side side = order->side();
+    const Price price = order->price();
+    const OrderId orderId = order->orderId();
 
-        Qty tradeQty = std::min(incoming->pending_quantity(), headOrder->pending_quantity());
-        Price tradePrice = headOrder->price();
+    order->refreshWorkingQuantity();
 
-        std::cout << "TRADE: "
-                  << (incomingSide == Side::BUY ? "BUY" : "SELL")
-                  << " matched with "
-                  << (incomingSide == Side::BUY ? "SELL" : "BUY")
-                  << " @ " << tradePrice
-                  << " for " << tradeQty << " qty\n";
-
-        incoming->addFill(tradeQty);
-        oppositeLevel.addFill(tradeQty);
-
-        if (PriceLevel* sameSideLevel =
-        (incomingSide == Side::BUY) ? this->bids_.find(incoming->price())
-                                    : this->asks_.find(incoming->price())) {
-            sameSideLevel->decOpenQty(tradeQty);
-                                    }
-
-        if (headOrder->pending_quantity() == 0) {
-            oppositeLevel.removeOrder(headOrder->orderId());
-            if (oppositeLevel.empty()) {
-                if (incomingSide == Side::BUY)
-                    this->asks_.erase(tradePrice);
-                else
-                    this->bids_.erase(tradePrice);
-                break;
-            }
-            continue;
-        }
-
-        if (incoming->pending_quantity() == 0)
-            break;
+    if (PriceLevel* level = findLevel(side, price); level) {
+        level->addOrder(std::move(order));
+    } else {
+        PriceLevel pl;
+        pl.addOrder(std::move(order));
+        insertLevel(side, price, std::move(pl));
     }
 
-    if (incoming->pending_quantity() > 0) {
-        if (incomingSide == Side::BUY) {
-            if (auto* lvl = this->bids_.find(incoming->price()); !lvl) {
-                PriceLevel pl;
-                pl.addOrder(std::move(incoming));
-                this->bids_.insert(pl.headOrder()->price(), std::move(pl));
-            } else {
-                lvl->addOrder(std::move(incoming));
-            }
-        } else {
-            if (auto* lvl = this->asks_.find(incoming->price()); !lvl) {
-                PriceLevel pl;
-                pl.addOrder(std::move(incoming));
-                this->asks_.insert(pl.headOrder()->price(), std::move(pl));
-            } else {
-                lvl->addOrder(std::move(incoming));
-            }
-        }
+    book_.order_index_[orderId] = {side, price};
+}
+
+void OrderBook::BookContext::removeRestingOrder(Side restingSide, Price price, PriceLevel& level, OrderId orderId) {
+    auto removed = level.removeOrder(orderId);
+    book_.order_index_.erase(orderId);
+
+    if (removed && removed->hasDisplayQuantity() && removed->remaining_quantity() > 0) {
+        removed->refreshWorkingQuantity();
+        restOrder(std::move(removed));
+        return;
+    }
+
+    if (level.empty()) {
+        if (restingSide == Side::BUY)
+            book_.bids_.erase(price);
+        else if (restingSide == Side::SELL)
+            book_.asks_.erase(price);
     }
 }
 
+void OrderBook::BookContext::recordTrade(const TradeEvent& event) {
+    book_.emitTrade(event);
+}
+
+PriceLevel* OrderBook::BookContext::findLevel(Side side, Price price) {
+    if (side == Side::BUY)
+        return book_.bids_.find(price);
+    if (side == Side::SELL)
+        return book_.asks_.find(price);
+    return nullptr;
+}
+
+void OrderBook::BookContext::insertLevel(Side side, Price price, PriceLevel&& level) {
+    if (side == Side::BUY)
+        book_.bids_.insert(price, std::move(level));
+    else if (side == Side::SELL)
+        book_.asks_.insert(price, std::move(level));
+}
+
+Qty OrderBook::BookContext::availableLiquidityAgainst(Side incomingSide, Price limitPrice) const {
+    if (incomingSide == Side::BUY)
+        return liquidityForBuy(limitPrice);
+    if (incomingSide == Side::SELL)
+        return liquidityForSell(limitPrice);
+    return 0;
+}
+
+Qty OrderBook::BookContext::liquidityForBuy(Price limitPrice) const {
+    Qty total = 0;
+    book_.asks_.inOrder([&](const Price& price, PriceLevel& level) {
+        if (price <= limitPrice)
+            total += level.openQty();
+    });
+    return total;
+}
+
+Qty OrderBook::BookContext::liquidityForSell(Price limitPrice) const {
+    Qty total = 0;
+    book_.bids_.inOrder([&](const Price& price, PriceLevel& level) {
+        if (price >= limitPrice)
+            total += level.openQty();
+    });
+    return total;
+}
+
+void OrderBook::emitTrade(const TradeEvent& event) const {
+    if (trade_listener_)
+        trade_listener_(event);
+}
+
+MatchingStrategy* OrderBook::strategyFor(OrderType type) {
+    auto it = strategies_.find(type);
+    if (it != strategies_.end() && it->second)
+        return it->second.get();
+
+    auto fallback = strategies_.find(OrderType::LIMIT);
+    return (fallback != strategies_.end()) ? fallback->second.get() : nullptr;
+}
 
 const Order* OrderBook::bestBid() const {
     auto* best = bids_.best();
@@ -260,29 +295,30 @@ void OrderBook::printBook() const {
 
     const size_t rows = std::max(asks.size(), bids.size());
 
-    std::cout << "\n" COLOR_BOLD
-              << "╔══════════════════════════════════════════════════════════════════╗\n"
-              << "║                           ORDER BOOK                             ║\n"
-              << "╚══════════════════════════════════════════════════════════════════╝\n"
-              << COLOR_RESET;
+    std::ostringstream out;
+    out << "\n" COLOR_BOLD
+        << "╔══════════════════════════════════════════════════════════════════╗\n"
+        << "║                           ORDER BOOK                             ║\n"
+        << "╚══════════════════════════════════════════════════════════════════╝\n"
+        << COLOR_RESET;
 
-    std::cout << COLOR_DIM
-              << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- BIDS (BUY) ---"
-              << std::setw(COL_GAP) << " "
-              << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- ASKS (SELL) ---"
-              << COLOR_RESET << "\n";
+    out << COLOR_DIM
+        << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- BIDS (BUY) ---"
+        << std::setw(COL_GAP) << " "
+        << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- ASKS (SELL) ---"
+        << COLOR_RESET << "\n";
 
-    std::cout << COLOR_DIM
-              << std::setw(PRICE_WIDTH) << "Price"
-              << std::setw(QTY_WIDTH)   << "Qty"
-              << std::setw(COL_GAP + 2) << " "
-              << std::setw(PRICE_WIDTH) << "Price"
-              << std::setw(QTY_WIDTH)   << "Qty"
-              << COLOR_RESET << "\n";
+    out << COLOR_DIM
+        << std::setw(PRICE_WIDTH) << "Price"
+        << std::setw(QTY_WIDTH)   << "Qty"
+        << std::setw(COL_GAP + 2) << " "
+        << std::setw(PRICE_WIDTH) << "Price"
+        << std::setw(QTY_WIDTH)   << "Qty"
+        << COLOR_RESET << "\n";
 
-    std::cout << COLOR_DIM
-              << "────────────────────────────────────────────────────────────────────\n"
-              << COLOR_RESET;
+    out << COLOR_DIM
+        << "────────────────────────────────────────────────────────────────────\n"
+        << COLOR_RESET;
 
     for (size_t i = 0; i < rows; ++i) {
         std::ostringstream left, right;
@@ -314,18 +350,14 @@ void OrderBook::printBook() const {
                   << COLOR_RESET;
         }
 
-        std::cout << left.str()
-                  << std::setw(COL_GAP) << " "
-                  << right.str() << "\n";
+        out << left.str()
+            << std::setw(COL_GAP) << " "
+            << right.str() << "\n";
     }
 
-    std::cout << COLOR_DIM
-              << "────────────────────────────────────────────────────────────────────\n"
-              << COLOR_RESET;
-}
+    out << COLOR_DIM
+        << "────────────────────────────────────────────────────────────────────\n"
+        << COLOR_RESET;
 
-
-
-HrtTime OrderBook::getTimestamp() {
-    return std::chrono::high_resolution_clock::now();
+    logging::logger().info(out.str());
 }
