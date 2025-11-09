@@ -31,15 +31,15 @@ public:
 
     PriceLevel(const PriceLevel&) = delete;
     PriceLevel& operator=(const PriceLevel&) = delete;
-    PriceLevel(PriceLevel&&) noexcept = default;
-    PriceLevel& operator=(PriceLevel&&) noexcept = default;
+    PriceLevel(PriceLevel&& other) noexcept;
+    PriceLevel& operator=(PriceLevel&& other) noexcept;
 
     void addOrder(std::unique_ptr<Order>&& order);
     ModifyResult modifyOrder(OrderId order_id, Price new_price, Qty new_qty);
 
-    const Order* headOrder() const;
+    Order* headOrder();
     std::unique_ptr<Order> popHead();
-    bool removeOrder(uint64_t order_id);
+    std::unique_ptr<Order> removeOrder(OrderId order_id);
     bool empty() const;
     Qty totalQty() const;
     void print() const;

@@ -12,6 +12,7 @@
 
 #include "datastructures/RBTree.h"
 
+
 class OrderBook {
 private:
     RBTree<Price, PriceLevel, std::greater<Price>> bids_;
@@ -31,10 +32,10 @@ public:
 
     void addOrder(std::unique_ptr<Order> order);
     bool cancelOrder(OrderId orderId);
-    void modifyOrder(OrderId orderId, double newPrice, uint32_t newQty);
+    void modifyOrder(OrderId orderId, Price newPrice, Qty newQty);
 
-    const Order* bestBid() const;
-    const Order* bestAsk() const;
+    const Order *bestAsk() const;
+    const Order *bestBid() const;
 
     void printBook() const;
 

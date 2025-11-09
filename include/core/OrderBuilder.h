@@ -9,14 +9,14 @@
 
 class OrderBuilder {
 private:
-    uint64_t order_id_;
+    OrderId order_id_;
     Side side_;
-    int64_t price_;
-    uint32_t quantity_;
-    uint64_t timestamp_;
+    Price price_;
+    Qty quantity_;
+    HrtTime timestamp_;
 
 public:
-    OrderBuilder& setOrderId(uint64_t id) {
+    OrderBuilder& setOrderId(OrderId id) {
         order_id_ = id;
         return *this;
     }
@@ -26,30 +26,26 @@ public:
         return *this;
     }
 
-    OrderBuilder& setPrice(double p) {
+    OrderBuilder& setPrice(Price p) {
         price_ = p;
         return *this;
     }
 
-    OrderBuilder& setQuantity(uint32_t q) {
+    OrderBuilder& setQuantity(Qty q) {
         quantity_ = q;
         return *this;
     }
 
-    OrderBuilder& setTimestamp(uint64_t ts) {
+    OrderBuilder& setTimestamp(HrtTime ts) {
         timestamp_ = ts;
         return *this;
     }
 
-    Order build() const {
-        if (!order_id_ || side_== Side::INVALID || !price_ || !quantity_ || !timestamp_)
-            throw std::runtime_error("Missing required order fields");
+    [[nodiscard]] std::unique_ptr<Order> build() {
+        // if (!order_id_ || side_== Side::INVALID || !price_ || !quantity_)
+        //     throw std::runtime_error("Missing required order fields");
 
-        if (price_ <= 0)
-            throw std::runtime_error("Invalid price: must be > 0");
-
-
-        return Order(order_id_, side_, price_, quantity_, timestamp_);
+        return std::unique_ptr<Order>(new Order(order_id_, side_, price_, quantity_, timestamp_));
     }
 };
 

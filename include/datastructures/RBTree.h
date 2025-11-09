@@ -26,6 +26,14 @@ private:
             : key(k), value(std::move(v)), color(c), parent(p), left(nullptr), right(nullptr) {}
     };
 
+    template <typename Func>
+    void inOrderImpl(Node* node, Func&& fn) const {
+        if (!node) return;
+        inOrderImpl(node->left, fn);
+        fn(node->key, node->value);
+        inOrderImpl(node->right, fn);
+    }
+
     Node* root_ = nullptr;
     size_t size_ = 0;
     Compare comp_{};
@@ -124,6 +132,11 @@ public:
         return findMax();
     }
 
+    template <typename Func>
+    void inOrder(Func&& fn) const {
+        inOrderImpl(root_, std::forward<Func>(fn));
+    }
+
 private:
     // ==========================================================
     //  INTERNAL HELPERS
@@ -171,6 +184,7 @@ private:
     //  ROTATION / BALANCING LOGIC
     // ==========================================================
     void rotateLeft(Node* x) {
+        if (!x || !x->right) return;
         Node* y = x->right;
         x->right = y->left;
         if (y->left) y->left->parent = x;
@@ -292,52 +306,66 @@ private:
         while (x != root_ && (!x || x->color == Color::BLACK)) {
             Node* parent = x ? x->parent : nullptr;
             if (!parent) break;
-            bool leftChild = (x == parent->left);
-            Node* sibling = leftChild ? parent->right : parent->left;
 
-            if (sibling && sibling->color == Color::RED) {
+            bool leftChild = (x == parent->left);
+            Node* sibling  = leftChild ? parent->right : parent->left;
+
+            if (!sibling) {
+                x = parent;
+                continue;
+            }
+
+            if (sibling->color == Color::RED) {
                 sibling->color = Color::BLACK;
-                parent->color = Color::RED;
+                parent->color  = Color::RED;
                 if (leftChild)
                     rotateLeft(parent);
                 else
                     rotateRight(parent);
                 sibling = leftChild ? parent->right : parent->left;
+                if (!sibling) continue;
             }
 
-            if ((!sibling->left || sibling->left->color == Color::BLACK) &&
-                (!sibling->right || sibling->right->color == Color::BLACK)) {
-                if (sibling) sibling->color = Color::RED;
+            bool leftBlack  = !sibling->left  || sibling->left->color  == Color::BLACK;
+            bool rightBlack = !sibling->right || sibling->right->color == Color::BLACK;
+
+            if (leftBlack && rightBlack) {
+                sibling->color = Color::RED;
                 x = parent;
-            } else {
-                if (leftChild && sibling->right && sibling->right->color == Color::BLACK) {
-                    sibling->left->color = Color::BLACK;
+                continue;
+            }
+
+            if (leftChild) {
+                if (sibling->right && sibling->right->color == Color::BLACK) {
+                    if (sibling->left) sibling->left->color = Color::BLACK;
                     sibling->color = Color::RED;
                     rotateRight(sibling);
                     sibling = parent->right;
-                } else if (!leftChild && sibling->left && sibling->left->color == Color::BLACK) {
-                    sibling->right->color = Color::BLACK;
+                    if (!sibling) continue;
+                }
+            } else {
+                if (sibling->left && sibling->left->color == Color::BLACK) {
+                    if (sibling->right) sibling->right->color = Color::BLACK;
                     sibling->color = Color::RED;
                     rotateLeft(sibling);
                     sibling = parent->left;
+                    if (!sibling) continue;
                 }
-
-                if (sibling)
-                    sibling->color = parent->color;
-                parent->color = Color::BLACK;
-                if (leftChild && sibling && sibling->right)
-                    sibling->right->color = Color::BLACK;
-                else if (!leftChild && sibling && sibling->left)
-                    sibling->left->color = Color::BLACK;
-
-                if (leftChild)
-                    rotateLeft(parent);
-                else
-                    rotateRight(parent);
-                break;
             }
-        }
 
-        if (x) x->color = Color::BLACK;
+            sibling->color = parent->color;
+            parent->color  = Color::BLACK;
+            if (leftChild && sibling->right)
+                sibling->right->color = Color::BLACK;
+            else if (!leftChild && sibling->left)
+                sibling->left->color = Color::BLACK;
+
+            if (leftChild)
+                rotateLeft(parent);
+            else
+                rotateRight(parent);
+            break;
+        }
     }
+
 };

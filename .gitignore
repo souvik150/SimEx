@@ -3,3 +3,4 @@
 *.csv
 *.db
 cmake-build-debug
+build/

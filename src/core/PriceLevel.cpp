@@ -4,6 +4,38 @@
 
 #include "core/PriceLevel.h"
 
+PriceLevel::PriceLevel(PriceLevel&& other) noexcept {
+    head_ = other.head_;
+    tail_ = other.tail_;
+    order_map_ = std::move(other.order_map_);
+    total_qty_ = other.total_qty_;
+
+    other.head_ = nullptr;
+    other.tail_ = nullptr;
+    other.total_qty_ = 0;
+    other.order_map_.clear();
+}
+
+PriceLevel& PriceLevel::operator=(PriceLevel&& other) noexcept {
+    if (this == &other) {
+        return *this;
+    }
+
+    clear();
+
+    head_ = other.head_;
+    tail_ = other.tail_;
+    order_map_ = std::move(other.order_map_);
+    total_qty_ = other.total_qty_;
+
+    other.head_ = nullptr;
+    other.tail_ = nullptr;
+    other.total_qty_ = 0;
+    other.order_map_.clear();
+
+    return *this;
+}
+
 void PriceLevel::addOrder(std::unique_ptr<Order>&& order) {
     const uint64_t id = order->orderId();
     const auto node = new Node(std::move(order));
@@ -44,7 +76,7 @@ ModifyResult PriceLevel::modifyOrder(OrderId order_id, Price new_price, Qty new_
     return Invalid;
 }
 
-const Order* PriceLevel::headOrder() const {
+ Order* PriceLevel::headOrder() {
     return head_ ? head_->order.get() : nullptr;
 }
 
@@ -62,11 +94,11 @@ std::unique_ptr<Order> PriceLevel::popHead() {
     return order;
 }
 
-bool PriceLevel::removeOrder(OrderId order_id) {
+std::unique_ptr<Order> PriceLevel::removeOrder(OrderId order_id) {
     const auto it = order_map_.find(order_id);
-    if (it == order_map_.end()) return false;
+    if (it == order_map_.end()) return nullptr;
 
-    const Node* node = it->second;
+    Node* node = it->second;
     order_map_.erase(it);
     total_qty_ -= node->order->quantity();
 
@@ -75,8 +107,9 @@ bool PriceLevel::removeOrder(OrderId order_id) {
     if (node->next) node->next->prev = node->prev;
     else tail_ = node->prev;
 
+    std::unique_ptr<Order> order = std::move(node->order);
     delete node;
-    return true;
+    return order;
 }
 
 bool PriceLevel::empty() const { return !head_; }

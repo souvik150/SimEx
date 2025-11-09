@@ -24,8 +24,9 @@ private:
     uint32_t user_id_;
     HrtTime timestamp_;
 
-    Order(const uint64_t id, const Side s, const int64_t p, const uint32_t q, const uint64_t ts)
-        : order_id_(id), side_(s), price_(p), quantity_(q), timestamp_(ts) {}
+    Order( OrderId id,  Side s,  Price p,  Qty q,  HrtTime ts)
+        : order_id_(id), side_(s), price_(p), quantity_(q), filled_quantity_(0), timestamp_(ts) {
+    }
 
 public:
     // call using builder
@@ -44,13 +45,22 @@ public:
     Side side() const { return side_; }
     Price price() const { return price_; }
     Qty quantity() const { return quantity_; }
+    Qty filled_quantity() const { return filled_quantity_; }
+    Qty pending_quantity() const { return quantity_ - filled_quantity_; }
     HrtTime timestamp() const { return timestamp_; }
 
     bool modifyQty(const Qty newOrderQty) {
         if (const uint32_t remainingQty = quantity_ - filled_quantity_; newOrderQty < remainingQty) {
+            throw std::runtime_error("invalid mod");
             return false;
         }
         quantity_ = newOrderQty;
+        timestamp_ = std::chrono::high_resolution_clock::now();
+        return true;
+    }
+
+    bool addFill(const Qty filledQty) {
+        filled_quantity_ += filledQty;
         timestamp_ = std::chrono::high_resolution_clock::now();
         return true;
     }
