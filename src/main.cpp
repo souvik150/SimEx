@@ -3,92 +3,66 @@
 //
 #include <iostream>
 #include <chrono>
-
+#include <random>
 #include "core/OrderBook.h"
 #include "core/OrderBuilder.h"
 
 int main() {
     try {
         OrderBook book;
-
         auto now = std::chrono::high_resolution_clock::now();
 
-        // ──────────────────────────────────────────────
-        // 1️⃣ Add first BUY order
-        // ──────────────────────────────────────────────
-        auto buy1 = OrderBuilder()
-            .setOrderId(1)
-            .setSide(Side::BUY)
-            .setPrice(1000)
-            .setQuantity(10)
-            .setTimestamp(now)
-            .build();
+        // Seed RNG
+        std::mt19937 rng(std::random_device{}());
+        std::uniform_int_distribution<int> side_dist(0, 1);     // 0 = BUY, 1 = SELL
+        std::uniform_int_distribution<int> price_offset(-30, 30);
+        std::uniform_int_distribution<int> qty_dist(1, 15);
 
-        if (!buy1) {
-            std::cerr << "Failed to build BUY order 1\n";
-            return 1;
+        constexpr int MID_PRICE = 1050;
+        constexpr int NUM_ORDERS = 100;
+
+        std::cout << "🚀 Generating " << NUM_ORDERS << " random orders...\n";
+
+        for (int i = 1; i <= NUM_ORDERS; ++i) {
+            bool isSell = side_dist(rng);
+            Price price = MID_PRICE + static_cast<Price>(price_offset(rng));
+            Qty qty     = static_cast<Qty>(qty_dist(rng));
+
+            auto order = OrderBuilder()
+                .setOrderId(static_cast<OrderId>(i))
+                .setSide(isSell ? Side::SELL : Side::BUY)
+                .setPrice(price)
+                .setQuantity(qty)
+                .setTimestamp(now + std::chrono::nanoseconds(i * 100))
+                .build();
+
+            if (!order) {
+                std::cerr << "Failed to build order " << i << "\n";
+                continue;
+            }
+            book.addOrder(std::move(order));
         }
-        book.addOrder(std::move(buy1));
-        std::cout<<"added order 1"<<std::endl;
 
-        // ──────────────────────────────────────────────
-        // 2️⃣ Add first SELL order (won’t match)
-        // ──────────────────────────────────────────────
-        auto sell1 = OrderBuilder()
-            .setOrderId(2)
-            .setSide(Side::SELL)
-            .setPrice(1050)
-            .setQuantity(5)
-            .setTimestamp(now)
-            .build();
-        if (!sell1) {
-            std::cerr << "Failed to build SELL order 2\n";
-            return 1;
-        }
-        book.addOrder(std::move(sell1));
-        std::cout<<"added order 2"<<std::endl;
-
-        std::cout << "\n📘 Initial Book:\n";
+        std::cout << "\n📘 Initial Randomized Book Snapshot:\n";
         book.printBook();
 
         // ──────────────────────────────────────────────
-        // 3️⃣ Add another BUY crossing the SELL (match)
-        // ──────────────────────────────────────────────
-        auto buy2 = OrderBuilder()
-            .setOrderId(3)
-            .setSide(Side::BUY)
-            .setPrice(1060)
-            .setQuantity(3)
-            .setTimestamp(std::chrono::high_resolution_clock::now())
-            .build();
-
-        if (!buy2) {
-            std::cerr << "Failed to build BUY order 3\n";
-            return 1;
-        }
-        book.addOrder(std::move(buy2));
-
-        std::cout << "\n📈 After Matching:\n";
-        book.printBook();
-
-        // ──────────────────────────────────────────────
-        // 4️⃣ Modify existing BUY (increase price)
-        // ──────────────────────────────────────────────
-        std::cout << "\n✏️  Modifying Order 1 price to 107.0\n";
-        book.modifyOrder(1, 1070, 10);
-
+        std::cout << "\n✏️  Modifying a few random orders...\n";
+        book.modifyOrder(5, 1075, 12);
+        book.modifyOrder(10, 1040, 8);
+        book.modifyOrder(15, 1060, 7);
 
         std::cout << "\n📊 After Modify:\n";
         book.printBook();
 
         // ──────────────────────────────────────────────
-        // 5️⃣ Cancel an order
-        // ──────────────────────────────────────────────
-        std::cout << "\n❌ Cancelling Order 2\n";
-        if (book.cancelOrder(1))
-            std::cout << "Order 2 cancelled successfully.\n";
-        else
-            std::cout << "Failed to cancel order 2.\n";
+        std::cout << "\n❌ Cancelling few random orders...\n";
+        for (int id : {3, 8, 20, 33, 42}) {
+            if (book.cancelOrder(static_cast<OrderId>(id)))
+                std::cout << "Order " << id << " cancelled successfully.\n";
+            else
+                std::cout << "Failed to cancel order " << id << ".\n";
+        }
 
         std::cout << "\n📘 Final Book Snapshot:\n";
         book.printBook();

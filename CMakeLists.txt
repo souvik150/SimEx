@@ -42,3 +42,9 @@ target_link_libraries(order_matching_system
         core
         strategies
 )
+
+add_executable(order_book_tests tests/OrderBookTest.cpp)
+target_link_libraries(order_book_tests
+        PRIVATE
+        core
+)

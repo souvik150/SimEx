@@ -23,7 +23,7 @@ private:
     Node* head_ = nullptr;
     Node* tail_ = nullptr;
     std::unordered_map<uint64_t, Node*> order_map_;
-    Qty total_qty_ = 0;
+    Qty open_qty_ = 0;
 
 public:
     PriceLevel() = default;
@@ -41,9 +41,11 @@ public:
     std::unique_ptr<Order> popHead();
     std::unique_ptr<Order> removeOrder(OrderId order_id);
     bool empty() const;
-    Qty totalQty() const;
+    Qty openQty() const;
     void print() const;
     void clear();
+    void addFill(Qty tradeQty);
+    void decOpenQty(Qty qty) noexcept;
 };
 
 #endif //SIMEX_PRICELEVEL_H

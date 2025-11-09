@@ -177,7 +177,13 @@ void OrderBook::match(std::unique_ptr<Order> incoming, PriceLevel& oppositeLevel
                   << " for " << tradeQty << " qty\n";
 
         incoming->addFill(tradeQty);
-        headOrder->addFill(tradeQty);
+        oppositeLevel.addFill(tradeQty);
+
+        if (PriceLevel* sameSideLevel =
+        (incomingSide == Side::BUY) ? this->bids_.find(incoming->price())
+                                    : this->asks_.find(incoming->price())) {
+            sameSideLevel->decOpenQty(tradeQty);
+                                    }
 
         if (headOrder->pending_quantity() == 0) {
             oppositeLevel.removeOrder(headOrder->orderId());
@@ -186,8 +192,9 @@ void OrderBook::match(std::unique_ptr<Order> incoming, PriceLevel& oppositeLevel
                     this->asks_.erase(tradePrice);
                 else
                     this->bids_.erase(tradePrice);
+                break;
             }
-            break;
+            continue;
         }
 
         if (incoming->pending_quantity() == 0)
@@ -226,6 +233,13 @@ const Order* OrderBook::bestAsk() const {
     return best ? best->headOrder() : nullptr;
 }
 
+Qty OrderBook::totalOpenQtyAt(Side side, Price price) const {
+    const PriceLevel* level = (side == Side::BUY)
+        ? bids_.find(price)
+        : asks_.find(price);
+    return level ? level->openQty() : 0;
+}
+
 void OrderBook::printBook() const {
     constexpr int PRICE_WIDTH = 10;
     constexpr int QTY_WIDTH   = 8;
@@ -233,30 +247,30 @@ void OrderBook::printBook() const {
 
     std::vector<std::pair<Price, PriceLevel*>> asks, bids;
 
-    // Collect asks ascending, bids descending
+    // Collect asks ascending (lowest first)
     asks_.inOrder([&](const Price& p, PriceLevel& lvl) {
         asks.emplace_back(p, &lvl);
     });
 
+    // Collect bids ascending, but we want descending later
     bids_.inOrder([&](const Price& p, PriceLevel& lvl) {
         bids.emplace_back(p, &lvl);
     });
 
-    std::reverse(bids.begin(), bids.end());
 
     const size_t rows = std::max(asks.size(), bids.size());
 
     std::cout << "\n" COLOR_BOLD
               << "╔══════════════════════════════════════════════════════════════════╗\n"
-              << "║                         📊 ORDER BOOK                            ║\n"
+              << "║                           ORDER BOOK                             ║\n"
               << "╚══════════════════════════════════════════════════════════════════╝\n"
               << COLOR_RESET;
 
     std::cout << COLOR_DIM
-              << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "   --- ASKS (SELL) ---"
+              << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- BIDS (BUY) ---"
               << std::setw(COL_GAP) << " "
-              << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- BIDS (BUY) ---" << COLOR_RESET
-              << "\n";
+              << std::setw(PRICE_WIDTH + QTY_WIDTH + 4) << "--- ASKS (SELL) ---"
+              << COLOR_RESET << "\n";
 
     std::cout << COLOR_DIM
               << std::setw(PRICE_WIDTH) << "Price"
@@ -273,25 +287,30 @@ void OrderBook::printBook() const {
     for (size_t i = 0; i < rows; ++i) {
         std::ostringstream left, right;
 
-        // --- ASK (SELL) ---
-        if (i < asks.size()) {
-            auto* askHead = asks[i].second->headOrder();
-            left << COLOR_RED
-                 << std::fixed << std::setprecision(2)
-                 << std::setw(PRICE_WIDTH) << asks[i].first
-                 << std::setw(QTY_WIDTH)   << (askHead ? askHead->pending_quantity() : 0)
-                 << COLOR_RESET;
-        } else {
-            left << std::string(PRICE_WIDTH + QTY_WIDTH, ' ');
-        }
+        bool isBestBid = (i == 0 && !bids.empty());
+        bool isBestAsk = (i == 0 && !asks.empty());
 
         // --- BID (BUY) ---
         if (i < bids.size()) {
-            const auto* bidHead = bids[i].second->headOrder();
-            right << COLOR_GREEN
+            Qty pending_qty = bids[i].second ? bids[i].second->openQty() : 0;
+            left << (isBestBid ? COLOR_BOLD COLOR_GREEN : COLOR_GREEN)
+                 << std::fixed << std::setprecision(2)
+                 << std::setw(PRICE_WIDTH) << bids[i].first
+                 << std::setw(QTY_WIDTH)   << pending_qty
+                 << (isBestBid ? "  ←" : "")
+                 << COLOR_RESET;
+        } else {
+            left << std::string(PRICE_WIDTH + QTY_WIDTH + 3, ' ');
+        }
+
+        // --- ASK (SELL) ---
+        if (i < asks.size()) {
+            Qty pending_qty = asks[i].second ? asks[i].second->openQty() : 0;
+            right << (isBestAsk ? COLOR_BOLD COLOR_RED : COLOR_RED)
                   << std::fixed << std::setprecision(2)
-                  << std::setw(PRICE_WIDTH) << bids[i].first
-                  << std::setw(QTY_WIDTH)   << (bidHead ? bidHead->pending_quantity() : 0)
+                  << std::setw(PRICE_WIDTH) << asks[i].first
+                  << std::setw(QTY_WIDTH)   << pending_qty
+                  << (isBestAsk ? "  →" : "")
                   << COLOR_RESET;
         }
 
@@ -304,6 +323,7 @@ void OrderBook::printBook() const {
               << "────────────────────────────────────────────────────────────────────\n"
               << COLOR_RESET;
 }
+
 
 
 HrtTime OrderBook::getTimestamp() {

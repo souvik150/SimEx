@@ -218,6 +218,7 @@ private:
         while (node != root_ && node->parent->color == Color::RED) {
             Node* parent = node->parent;
             Node* grand = parent->parent;
+            if (!grand) break;
 
             if (parent == grand->left) {
                 Node* uncle = grand->right;

@@ -37,6 +37,8 @@ public:
     const Order *bestAsk() const;
     const Order *bestBid() const;
 
+    Qty totalOpenQtyAt(Side side, Price price) const;
+
     void printBook() const;
 
 private:
