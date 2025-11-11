@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "utils/Logger.h"
+#include "utils/LogMacros.h"
 
 OrderBook& OrderBookManager::ensureBook(InstrumentToken token) {
     auto& entry = books_[token];
@@ -19,7 +19,7 @@ void OrderBookManager::addOrder(std::unique_ptr<Order> order) {
 
     const InstrumentToken token = order->instrument_token();
     if (token == 0) {
-        logging::logger().warn("Ignoring order {} without instrument token", order->orderId());
+        LOG_WARN("Ignoring order {} without instrument token", order->orderId());
         return;
     }
 

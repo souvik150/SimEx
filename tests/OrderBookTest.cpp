@@ -6,7 +6,7 @@
 #include "core/OrderBook.h"
 #include "core/OrderBookManager.h"
 #include "core/OrderBuilder.h"
-#include "utils/Logger.h"
+#include "utils/LogMacros.h"
 
 namespace {
 
@@ -198,7 +198,7 @@ int main() {
 
         return 0;
     } catch (const std::exception& ex) {
-        logging::logger().error("OrderBook tests failed: {}", ex.what());
+        LOG_ERROR("OrderBook tests failed: {}", ex.what());
         return 1;
     }
 }

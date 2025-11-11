@@ -13,7 +13,7 @@
 #include "strategies/ImmediateOrCancelStrategy.h"
 #include "strategies/MarketStrategy.h"
 #include "strategies/PriceTimeStrategy.h"
-#include "utils/Logger.h"
+#include "utils/LogMacros.h"
 
 #define COLOR_RESET   "\033[0m"
 #define COLOR_RED     "\033[31m"
@@ -31,7 +31,7 @@ OrderBook::OrderBook()
     strategies_[OrderType::ICEBERG] = std::make_unique<IcebergStrategy>();
 
     trade_listener_ = [](const TradeEvent& event) {
-        logging::logger().info(
+        LOG_INFO(
             "TRADE: token={} {} matched with {} @ {} for {} qty",
             event.instrument,
             (event.aggressorSide == Side::BUY ? "BUY" : "SELL"),
@@ -86,7 +86,7 @@ bool OrderBook::cancelOrder(uint64_t orderId) {
 void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
     auto it = order_index_.find(orderId);
     if (it == order_index_.end()) {
-        logging::logger().warn("Modify failed: order {} not found", orderId);
+        LOG_WARN("Modify failed: order {} not found", orderId);
         return;
     }
 
@@ -360,5 +360,5 @@ void OrderBook::printBook() const {
         << "────────────────────────────────────────────────────────────────────\n"
         << COLOR_RESET;
 
-    logging::logger().info(out.str());
+    LOG_INFO("{}", out.str());
 }

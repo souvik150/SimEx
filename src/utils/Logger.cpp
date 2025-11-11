@@ -26,7 +26,7 @@ private:
         spdlog::init_thread_pool(kQueueSize, kWorkerThreads);
 
         auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        sink->set_pattern("%Y-%m-%d %H:%M:%S.%e [%^%l%$] %v");
+        sink->set_pattern("%Y-%m-%d %H:%M:%S.%e [%^%l%$] %s:%# %! %v");
 
         logger_ = std::make_shared<spdlog::async_logger>(
             "simex",
@@ -35,6 +35,7 @@ private:
             spdlog::async_overflow_policy::block);
 
         logger_->set_level(spdlog::level::info);
+        logger_->set_pattern("%Y-%m-%d %H:%M:%S.%e [%^%l%$] %s:%# %! %v");
         spdlog::register_logger(logger_);
     }
 

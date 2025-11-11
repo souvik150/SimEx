@@ -11,7 +11,7 @@
 #include "types/AppTypes.h"
 #include "types/OrderSide.h"
 #include "types/OrderType.h"
-#include "utils/Logger.h"
+#include "utils/LogMacros.h"
 
 class OrderBuilder;
 
@@ -130,7 +130,7 @@ public:
     }
 
     void print() const {
-        logging::logger().info(
+        LOG_INFO(
             "Order{{id={}, token={}, side={}, type={}, price={}, qty={}, display={}, ts={}}}",
             order_id_,
             instrument_token_,

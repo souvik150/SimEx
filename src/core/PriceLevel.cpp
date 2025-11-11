@@ -7,7 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "utils/Logger.h"
+#include "utils/LogMacros.h"
 
 PriceLevel::PriceLevel(MemPool<Node>* pool)
     : node_pool_(pool) {}
@@ -153,7 +153,7 @@ void PriceLevel::print() const {
         n = n->next;
     }
     out << "]";
-    logging::logger().info(out.str());
+    LOG_INFO("{}", out.str());
 }
 
 void PriceLevel::clear() {

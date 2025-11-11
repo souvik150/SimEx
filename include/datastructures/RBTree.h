@@ -2,7 +2,7 @@
 #include <functional>
 #include <memory>
 
-#include "utils/Logger.h"
+#include "utils/LogMacros.h"
 /**
  * @brief Generic header-only Red-Black Tree.
  *        Supports both ascending and descending order via comparator.
@@ -176,7 +176,7 @@ private:
     void printInOrder(Node* n) const {
         if (!n) return;
         printInOrder(n->left);
-        logging::logger().info("{}", n->key);
+        LOG_INFO("{}", n->key);
         printInOrder(n->right);
     }
 

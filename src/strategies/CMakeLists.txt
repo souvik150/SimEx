@@ -8,4 +8,4 @@ target_include_directories(strategies
 
 target_link_libraries(strategies
         PUBLIC
-        spdlog::spdlog)
+        utils)

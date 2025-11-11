@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
+add_compile_definitions(PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
+
 include(cmake/CPM.cmake)
 
 set(_spdlog_local "${CMAKE_SOURCE_DIR}/external/spdlog")
@@ -47,7 +49,7 @@ add_compile_options(
 
 add_subdirectory(src/core)
 add_subdirectory(src/strategies)
-
+add_subdirectory(src/utils)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose Release or Debug" FORCE)
