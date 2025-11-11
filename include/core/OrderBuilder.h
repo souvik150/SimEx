@@ -10,12 +10,13 @@
 class OrderBuilder {
 private:
     OrderId order_id_;
-    Side side_;
     Price price_;
-    Qty quantity_;
     HrtTime timestamp_;
-    OrderType order_type_ = OrderType::LIMIT;
+    Qty quantity_;
     Qty display_quantity_ = 0;
+    InstrumentToken instrument_token_ = 0;
+    OrderType order_type_ = OrderType::LIMIT;
+    Side side_ = Side::INVALID;
 
 public:
     OrderBuilder& setOrderId(OrderId id) {
@@ -38,6 +39,11 @@ public:
         return *this;
     }
 
+    OrderBuilder& setInstrumentToken(InstrumentToken token) {
+        instrument_token_ = token;
+        return *this;
+    }
+
     OrderBuilder& setTimestamp(HrtTime ts) {
         timestamp_ = ts;
         return *this;
@@ -57,7 +63,7 @@ public:
         // if (!order_id_ || side_== Side::INVALID || !price_ || !quantity_)
         //     throw std::runtime_error("Missing required order fields");
 
-        return std::unique_ptr<Order>(new Order(order_id_, side_, price_, quantity_, timestamp_, order_type_, display_quantity_));
+        return std::unique_ptr<Order>(new Order(order_id_, instrument_token_, side_, price_, quantity_, timestamp_, order_type_, display_quantity_));
     }
 };
 

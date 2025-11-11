@@ -9,6 +9,7 @@ class Order;
 class PriceLevel;
 
 struct TradeEvent {
+    InstrumentToken instrument;
     Side aggressorSide;
     OrderId aggressorId;
     Side restingSide;

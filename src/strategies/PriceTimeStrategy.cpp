@@ -42,6 +42,7 @@ void PriceTimeStrategy::execute(std::unique_ptr<Order> order, MatchingContext& c
         oppositeLevel->addFill(tradeQty);
 
         context.recordTrade(TradeEvent{
+            .instrument = order->instrument_token(),
             .aggressorSide = incomingSide,
             .aggressorId = order->orderId(),
             .restingSide = oppositeSide,

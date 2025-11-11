@@ -15,12 +15,13 @@
 
 class OrderBuilder;
 
-struct Order {
+class Order {
     friend class OrderBuilder;
 private:
     OrderId order_id_;
     Price price_;
     HrtTime timestamp_;
+    InstrumentToken instrument_token_;
     Qty total_quantity_;
     Qty working_quantity_;
     Qty filled_quantity_;
@@ -29,10 +30,11 @@ private:
     OrderType type_;
     uint32_t user_id_ = 0;
 
-    Order(OrderId id, Side s, Price p, Qty q, HrtTime ts, OrderType type, Qty display_qty)
+    Order(OrderId id, InstrumentToken instrument, Side s, Price p, Qty q, HrtTime ts, OrderType type, Qty display_qty)
         : order_id_(id),
           price_(p),
           timestamp_(ts),
+          instrument_token_(instrument),
           total_quantity_(q),
           working_quantity_(q),
           filled_quantity_(0),
@@ -69,6 +71,7 @@ public:
     OrderId orderId() const { return order_id_; }
     Side side() const { return side_; }
     Price price() const { return price_; }
+    InstrumentToken instrument_token() const { return instrument_token_; }
     Qty quantity() const { return total_quantity_; }
     Qty workingQuantity() const { return working_quantity_; }
     Qty filled_quantity() const { return filled_quantity_; }
@@ -128,8 +131,9 @@ public:
 
     void print() const {
         logging::logger().info(
-            "Order{{id={}, side={}, type={}, price={}, qty={}, display={}, ts={}}}",
+            "Order{{id={}, token={}, side={}, type={}, price={}, qty={}, display={}, ts={}}}",
             order_id_,
+            instrument_token_,
             (side_ == Side::BUY ? "BUY" : "SELL"),
             printOrderType(type_),
             (type_ == OrderType::MARKET ? 0 : price_),

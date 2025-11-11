@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "core/OrderBook.h"
+#include "core/OrderBookManager.h"
 #include "core/OrderBuilder.h"
 #include "utils/Logger.h"
 
@@ -16,9 +17,11 @@ void expect(bool condition, const char* message) {
 }
 
 std::unique_ptr<Order> makeOrder(OrderId id, Side side, Price price, Qty qty,
-                                 OrderType type = OrderType::LIMIT, Qty display = 0) {
+                                 OrderType type = OrderType::LIMIT, Qty display = 0,
+                                 InstrumentToken token = 1) {
     auto builder = OrderBuilder()
         .setOrderId(id)
+        .setInstrumentToken(token)
         .setSide(side)
         .setPrice(price)
         .setQuantity(qty)
@@ -169,6 +172,28 @@ int main() {
 
             book.addOrder(makeOrder(53, Side::BUY, 1000, 4));
             expect(book.totalOpenQtyAt(Side::SELL, 1000) == 0, "All liquidity gone after final clip");
+        }
+
+        {
+            OrderBookManager manager;
+            const InstrumentToken nifty = 111;
+            const InstrumentToken bank = 222;
+
+            manager.addOrder(makeOrder(60, Side::BUY, 1000, 5, OrderType::LIMIT, 0, nifty));
+            manager.addOrder(makeOrder(61, Side::BUY, 1000, 7, OrderType::LIMIT, 0, bank));
+
+            expect(manager.totalOpenQtyAt(nifty, Side::BUY, 1000) == 5, "Token 111 depth mismatch");
+            expect(manager.totalOpenQtyAt(bank, Side::BUY, 1000) == 7, "Token 222 depth mismatch");
+
+            manager.addOrder(makeOrder(62, Side::SELL, 1000, 5, OrderType::LIMIT, 0, nifty));
+            expect(manager.totalOpenQtyAt(nifty, Side::BUY, 1000) == 0, "Matched depth should vanish for token 111");
+            expect(manager.totalOpenQtyAt(bank, Side::BUY, 1000) == 7, "Other instrument depth must remain untouched");
+
+            const Order* bankBid = manager.bestBid(bank);
+            expect(bankBid && bankBid->pending_quantity() == 7, "Token 222 best bid size mismatch");
+
+            manager.addOrder(makeOrder(63, Side::SELL, 1000, 7, OrderType::LIMIT, 0, bank));
+            expect(manager.bestBid(bank) == nullptr, "All bank orders should fill out");
         }
 
         return 0;

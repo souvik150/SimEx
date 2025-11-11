@@ -7,9 +7,10 @@
 #include <chrono>
 #include <cstdint>
 
-typedef  uint32_t Qty;
-typedef  uint64_t Price;
+typedef uint32_t Qty;
+typedef uint64_t Price;
 typedef uint64_t OrderId;
-typedef  std::chrono::system_clock::time_point HrtTime;
+typedef uint32_t InstrumentToken;
+typedef std::chrono::system_clock::time_point HrtTime;
 
 #endif //ORDERMATCHINGSYSTEM_TYPES_H

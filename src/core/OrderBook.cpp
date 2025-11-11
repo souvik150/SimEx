@@ -32,7 +32,8 @@ OrderBook::OrderBook()
 
     trade_listener_ = [](const TradeEvent& event) {
         logging::logger().info(
-            "TRADE: {} matched with {} @ {} for {} qty",
+            "TRADE: token={} {} matched with {} @ {} for {} qty",
+            event.instrument,
             (event.aggressorSide == Side::BUY ? "BUY" : "SELL"),
             (event.restingSide == Side::BUY ? "BUY" : "SELL"),
             event.price,
