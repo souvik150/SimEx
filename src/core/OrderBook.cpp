@@ -22,7 +22,8 @@
 #define COLOR_DIM     "\033[2m"
 
 OrderBook::OrderBook()
-    : context_(*this) {
+    : node_pool_(),
+      context_(*this) {
     strategies_[OrderType::LIMIT] = std::make_unique<PriceTimeStrategy>();
     strategies_[OrderType::MARKET] = std::make_unique<MarketStrategy>();
     strategies_[OrderType::IOC] = std::make_unique<ImmediateOrCancelStrategy>();
@@ -173,7 +174,7 @@ void OrderBook::BookContext::restOrder(std::unique_ptr<Order> order) {
     if (PriceLevel* level = findLevel(side, price); level) {
         level->addOrder(std::move(order));
     } else {
-        PriceLevel pl;
+        PriceLevel pl(&book_.node_pool_);
         pl.addOrder(std::move(order));
         insertLevel(side, price, std::move(pl));
     }
@@ -282,12 +283,11 @@ void OrderBook::printBook() const {
 
     std::vector<std::pair<Price, PriceLevel*>> asks, bids;
 
-    // Collect asks ascending (lowest first)
     asks_.inOrder([&](const Price& p, PriceLevel& lvl) {
         asks.emplace_back(p, &lvl);
     });
 
-    // Collect bids ascending, but we want descending later
+
     bids_.inOrder([&](const Price& p, PriceLevel& lvl) {
         bids.emplace_back(p, &lvl);
     });

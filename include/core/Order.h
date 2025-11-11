@@ -19,26 +19,27 @@ struct Order {
     friend class OrderBuilder;
 private:
     OrderId order_id_;
-    Side side_;
     Price price_;
+    HrtTime timestamp_;
     Qty total_quantity_;
     Qty working_quantity_;
     Qty filled_quantity_;
-    uint32_t user_id_;
-    HrtTime timestamp_;
-    OrderType type_;
     Qty display_quantity_;
+    Side side_;
+    OrderType type_;
+    uint32_t user_id_ = 0;
 
     Order(OrderId id, Side s, Price p, Qty q, HrtTime ts, OrderType type, Qty display_qty)
         : order_id_(id),
-          side_(s),
           price_(p),
+          timestamp_(ts),
           total_quantity_(q),
           working_quantity_(q),
           filled_quantity_(0),
-          timestamp_(ts),
+          display_quantity_(display_qty),
+          side_(s),
           type_(type),
-          display_quantity_(display_qty) {
+          user_id_(0) {
     }
 
     static const char* printOrderType(OrderType type) {

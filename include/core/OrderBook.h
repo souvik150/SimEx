@@ -13,6 +13,7 @@
 
 #include "datastructures/RBTree.h"
 #include "strategies/MatchingStrategy.h"
+#include "utils/MemPool.h"
 
 
 class OrderBook {
@@ -49,6 +50,7 @@ private:
 
     // this is used to know in which side of book an order is present
     std::unordered_map<OrderId, OrderRef> order_index_;
+    MemPool<PriceLevel::Node> node_pool_;
     BookContext context_;
     std::unordered_map<OrderType, std::unique_ptr<MatchingStrategy>> strategies_;
     TradeListener trade_listener_;

@@ -5,18 +5,24 @@
 #include "core/PriceLevel.h"
 
 #include <sstream>
+#include <stdexcept>
 
 #include "utils/Logger.h"
+
+PriceLevel::PriceLevel(MemPool<Node>* pool)
+    : node_pool_(pool) {}
 
 PriceLevel::PriceLevel(PriceLevel&& other) noexcept {
     head_ = other.head_;
     tail_ = other.tail_;
     order_map_ = std::move(other.order_map_);
     open_qty_ = other.open_qty_;
+    node_pool_ = other.node_pool_;
 
     other.head_ = nullptr;
     other.tail_ = nullptr;
     other.open_qty_ = 0;
+    other.node_pool_ = nullptr;
     other.order_map_.clear();
 }
 
@@ -31,19 +37,34 @@ PriceLevel& PriceLevel::operator=(PriceLevel&& other) noexcept {
     tail_ = other.tail_;
     order_map_ = std::move(other.order_map_);
     open_qty_ = other.open_qty_;
+    node_pool_ = other.node_pool_;
 
     other.head_ = nullptr;
     other.tail_ = nullptr;
     other.open_qty_ = 0;
+    other.node_pool_ = nullptr;
     other.order_map_.clear();
 
     return *this;
 }
 
+PriceLevel::Node* PriceLevel::createNode(std::unique_ptr<Order>&& order) {
+    if (!node_pool_)
+        throw std::runtime_error("PriceLevel allocator not set");
+    return node_pool_->allocate(std::move(order));
+}
+
+void PriceLevel::releaseNode(Node* node) {
+    if (!node_pool_)
+        delete node;
+    else
+        node_pool_->deallocate(node);
+}
+
 void PriceLevel::addOrder(std::unique_ptr<Order>&& order) {
     const uint64_t id = order->orderId();
     const Qty pending = order->pending_quantity();
-    const auto node = new Node(std::move(order));
+    Node* node = createNode(std::move(order));
     order_map_[id] = node;
     open_qty_ += pending;
 
@@ -96,7 +117,7 @@ std::unique_ptr<Order> PriceLevel::popHead() {
     decOpenQty(pending);
     auto order = std::move(node->order);
     order_map_.erase(order->orderId());
-    delete node;
+    releaseNode(node);
     return order;
 }
 
@@ -115,7 +136,7 @@ std::unique_ptr<Order> PriceLevel::removeOrder(OrderId order_id) {
     else tail_ = node->prev;
 
     std::unique_ptr<Order> order = std::move(node->order);
-    delete node;
+    releaseNode(node);
     return order;
 }
 
@@ -139,7 +160,7 @@ void PriceLevel::clear() {
     Node* n = head_;
     while (n) {
         Node* tmp = n->next;
-        delete n;
+        releaseNode(n);
         n = tmp;
     }
     order_map_.clear();

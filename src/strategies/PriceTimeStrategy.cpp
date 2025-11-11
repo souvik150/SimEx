@@ -55,6 +55,7 @@ void PriceTimeStrategy::execute(std::unique_ptr<Order> order, MatchingContext& c
         }
     }
 
+    //  turns an order that wasn’t fully filled right now into resting depth available for future matches
     if (allowRest && order && order->pending_quantity() > 0) {
         order->refreshWorkingQuantity();
         context.restOrder(std::move(order));
