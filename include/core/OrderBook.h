@@ -7,11 +7,15 @@
 
 #include "PriceLevel.h"
 #include "Order.h"
+#include <atomic>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
-#include "datastructures/RBTree.h"
+#include "core/OrderBookObserver.h"
+#include "core/SideContainer.h"
 #include "strategies/MatchingStrategy.h"
 #include "utils/MemPool.h"
 
@@ -40,8 +44,9 @@ public:
     };
 
 private:
-    RBTree<Price, PriceLevel, std::greater<Price>> bids_;
-    RBTree<Price, PriceLevel, std::less<Price>> asks_;
+    std::unique_ptr<SideContainer> bids_;
+    std::unique_ptr<SideContainer> asks_;
+    bool use_std_map_;
 
     struct OrderRef {
         Side side;
@@ -54,10 +59,21 @@ private:
     BookContext context_;
     std::unordered_map<OrderType, std::unique_ptr<MatchingStrategy>> strategies_;
     TradeListener trade_listener_;
+    InstrumentToken instrument_token_ = 0;
+    mutable std::vector<std::weak_ptr<OrderBookObserver>> observers_;
+    std::vector<TradeEvent> trade_ring_;
+    std::atomic<uint64_t> trade_head_{0};
+    std::atomic<uint64_t> trade_tail_{0};
+    std::atomic<bool> trade_running_{true};
+    std::thread trade_thread_;
+    std::atomic<Price> last_trade_price_{0};
+    std::atomic<Qty> last_trade_qty_{0};
+    void tradeWorker();
+    void dispatchTrade(const TradeEvent& event);
 
 public:
-    OrderBook();
-    ~OrderBook() = default;
+    explicit OrderBook(bool use_std_map = false);
+    ~OrderBook();
 
     void addOrder(std::unique_ptr<Order> order);
     void setMatchingStrategy(OrderType type, std::unique_ptr<MatchingStrategy> strategy);
@@ -73,6 +89,13 @@ public:
     void printBook() const;
     void emitTrade(const TradeEvent& event) const;
     MatchingStrategy* strategyFor(OrderType type);
+
+    void setInstrumentToken(InstrumentToken token);
+    InstrumentToken instrument_token() const;
+    void addObserver(const std::shared_ptr<OrderBookObserver>& observer);
+    void snapshot(std::vector<std::pair<Price, Qty>>& bids, std::vector<std::pair<Price, Qty>>& asks) const;
+    Price last_trade_price() const;
+    Qty last_trade_quantity() const;
 };
 
 

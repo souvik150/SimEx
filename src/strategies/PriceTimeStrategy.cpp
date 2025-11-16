@@ -41,15 +41,17 @@ void PriceTimeStrategy::execute(std::unique_ptr<Order> order, MatchingContext& c
         order->addFill(tradeQty);
         oppositeLevel->addFill(tradeQty);
 
-        context.recordTrade(TradeEvent{
-            .instrument = order->instrument_token(),
-            .aggressorSide = incomingSide,
-            .aggressorId = order->orderId(),
-            .restingSide = oppositeSide,
-            .restingOrderId = restingId,
-            .price = tradePrice,
-            .quantity = tradeQty,
-        });
+        if (tradeQty > 0) {
+            context.recordTrade(TradeEvent{
+                .instrument = order->instrument_token(),
+                .aggressorSide = incomingSide,
+                .aggressorId = order->orderId(),
+                .restingSide = oppositeSide,
+                .restingOrderId = restingId,
+                .price = tradePrice,
+                .quantity = tradeQty,
+            });
+        }
 
         if (headOrder->pending_quantity() == 0) {
             context.removeRestingOrder(oppositeSide, tradePrice, *oppositeLevel, restingId);

@@ -21,24 +21,29 @@
 #define COLOR_BOLD    "\033[1m"
 #define COLOR_DIM     "\033[2m"
 
-OrderBook::OrderBook()
-    : node_pool_(),
-      context_(*this) {
+OrderBook::OrderBook(bool use_std_map)
+    : bids_(makeSideContainer(use_std_map, Side::BUY)),
+      asks_(makeSideContainer(use_std_map, Side::SELL)),
+      use_std_map_(use_std_map),
+      node_pool_(),
+      context_(*this),
+      trade_ring_(2048),
+      trade_thread_([this] { tradeWorker(); }) {
     strategies_[OrderType::LIMIT] = std::make_unique<PriceTimeStrategy>();
     strategies_[OrderType::MARKET] = std::make_unique<MarketStrategy>();
     strategies_[OrderType::IOC] = std::make_unique<ImmediateOrCancelStrategy>();
     strategies_[OrderType::FOK] = std::make_unique<FillOrKillStrategy>();
     strategies_[OrderType::ICEBERG] = std::make_unique<IcebergStrategy>();
 
-    trade_listener_ = [](const TradeEvent& event) {
-        LOG_INFO(
-            "TRADE: token={} {} matched with {} @ {} for {} qty",
-            event.instrument,
-            (event.aggressorSide == Side::BUY ? "BUY" : "SELL"),
-            (event.restingSide == Side::BUY ? "BUY" : "SELL"),
-            event.price,
-            event.quantity);
-    };
+    trade_listener_ = [](const TradeEvent&) {};
+}
+
+OrderBook::~OrderBook() {
+    trade_running_.store(false, std::memory_order_release);
+    trade_head_.store(UINT32_MAX, std::memory_order_release);
+    if (trade_thread_.joinable()) {
+        trade_thread_.join();
+    }
 }
 
 void OrderBook::addOrder(std::unique_ptr<Order> order) {
@@ -66,16 +71,16 @@ bool OrderBook::cancelOrder(uint64_t orderId) {
 
     const auto& ref = it->second;
     if (ref.side == Side::BUY) {
-        auto* level = bids_.find(ref.price);
+        auto* level = bids_->find(ref.price);
         if (level && level->removeOrder(orderId)) {
-            if (level->empty()) bids_.erase(ref.price);
+            if (level->empty()) bids_->erase(ref.price);
             order_index_.erase(it);
             return true;
         }
     } else {
-        auto* level = asks_.find(ref.price);
+        auto* level = asks_->find(ref.price);
         if (level && level->removeOrder(orderId)) {
-            if (level->empty()) asks_.erase(ref.price);
+            if (level->empty()) asks_->erase(ref.price);
             order_index_.erase(it);
             return true;
         }
@@ -93,7 +98,7 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
     const auto& ref = it->second;
 
     if (ref.side == Side::BUY) {
-        auto* level = bids_.find(ref.price);
+        auto* level = bids_->find(ref.price);
         if (!level) return;
 
         auto result = level->modifyOrder(orderId, newPrice, newQty);
@@ -106,7 +111,7 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
                 if (!oldOrder) return;
 
                 if (level->empty())
-                    bids_.erase(ref.price);
+                    bids_->erase(ref.price);
                 order_index_.erase(orderId);
 
                 if (newQty != oldOrder->quantity())
@@ -123,7 +128,7 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
         }
     }
     else {
-        auto* level = asks_.find(ref.price);
+        auto* level = asks_->find(ref.price);
         if (!level) return;
 
         auto result = level->modifyOrder(orderId, newPrice, newQty);
@@ -136,7 +141,7 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
                 if (!oldOrder) return;
 
                 if (level->empty())
-                    asks_.erase(ref.price);
+                    asks_->erase(ref.price);
                 order_index_.erase(orderId);
 
                 if (newQty != oldOrder->quantity())
@@ -156,9 +161,9 @@ void OrderBook::modifyOrder(OrderId orderId, Price newPrice, Qty newQty) {
 
 PriceLevel* OrderBook::BookContext::bestLevel(Side side) {
     if (side == Side::BUY)
-        return book_.bids_.best();
+        return book_.bids_->best();
     if (side == Side::SELL)
-        return book_.asks_.best();
+        return book_.asks_->best();
     return nullptr;
 }
 
@@ -195,29 +200,29 @@ void OrderBook::BookContext::removeRestingOrder(Side restingSide, Price price, P
 
     if (level.empty()) {
         if (restingSide == Side::BUY)
-            book_.bids_.erase(price);
+            book_.bids_->erase(price);
         else if (restingSide == Side::SELL)
-            book_.asks_.erase(price);
+            book_.asks_->erase(price);
     }
 }
 
 void OrderBook::BookContext::recordTrade(const TradeEvent& event) {
-    book_.emitTrade(event);
+    book_.dispatchTrade(event);
 }
 
 PriceLevel* OrderBook::BookContext::findLevel(Side side, Price price) {
     if (side == Side::BUY)
-        return book_.bids_.find(price);
+        return book_.bids_->find(price);
     if (side == Side::SELL)
-        return book_.asks_.find(price);
+        return book_.asks_->find(price);
     return nullptr;
 }
 
 void OrderBook::BookContext::insertLevel(Side side, Price price, PriceLevel&& level) {
     if (side == Side::BUY)
-        book_.bids_.insert(price, std::move(level));
+        book_.bids_->insert(price, std::move(level));
     else if (side == Side::SELL)
-        book_.asks_.insert(price, std::move(level));
+        book_.asks_->insert(price, std::move(level));
 }
 
 Qty OrderBook::BookContext::availableLiquidityAgainst(Side incomingSide, Price limitPrice) const {
@@ -230,7 +235,7 @@ Qty OrderBook::BookContext::availableLiquidityAgainst(Side incomingSide, Price l
 
 Qty OrderBook::BookContext::liquidityForBuy(Price limitPrice) const {
     Qty total = 0;
-    book_.asks_.inOrder([&](const Price& price, PriceLevel& level) {
+    book_.asks_->forEach([&](const Price& price, PriceLevel& level) {
         if (price <= limitPrice)
             total += level.openQty();
     });
@@ -239,7 +244,7 @@ Qty OrderBook::BookContext::liquidityForBuy(Price limitPrice) const {
 
 Qty OrderBook::BookContext::liquidityForSell(Price limitPrice) const {
     Qty total = 0;
-    book_.bids_.inOrder([&](const Price& price, PriceLevel& level) {
+    book_.bids_->forEach([&](const Price& price, PriceLevel& level) {
         if (price >= limitPrice)
             total += level.openQty();
     });
@@ -249,6 +254,15 @@ Qty OrderBook::BookContext::liquidityForSell(Price limitPrice) const {
 void OrderBook::emitTrade(const TradeEvent& event) const {
     if (trade_listener_)
         trade_listener_(event);
+
+    for (auto it = observers_.begin(); it != observers_.end();) {
+        if (auto obs = it->lock()) {
+            obs->onTrade(*this, event);
+            ++it;
+        } else {
+            it = observers_.erase(it);
+        }
+    }
 }
 
 MatchingStrategy* OrderBook::strategyFor(OrderType type) {
@@ -261,19 +275,19 @@ MatchingStrategy* OrderBook::strategyFor(OrderType type) {
 }
 
 const Order* OrderBook::bestBid() const {
-    auto* best = bids_.best();
+    auto* best = bids_->best();
     return best ? best->headOrder() : nullptr;
 }
 
 const Order* OrderBook::bestAsk() const {
-    auto* best = asks_.best();
+    auto* best = asks_->best();
     return best ? best->headOrder() : nullptr;
 }
 
 Qty OrderBook::totalOpenQtyAt(Side side, Price price) const {
     const PriceLevel* level = (side == Side::BUY)
-        ? bids_.find(price)
-        : asks_.find(price);
+        ? bids_->find(price)
+        : asks_->find(price);
     return level ? level->openQty() : 0;
 }
 
@@ -284,12 +298,12 @@ void OrderBook::printBook() const {
 
     std::vector<std::pair<Price, PriceLevel*>> asks, bids;
 
-    asks_.inOrder([&](const Price& p, PriceLevel& lvl) {
+    asks_->forEach([&](const Price& p, PriceLevel& lvl) {
         asks.emplace_back(p, &lvl);
     });
 
 
-    bids_.inOrder([&](const Price& p, PriceLevel& lvl) {
+    bids_->forEach([&](const Price& p, PriceLevel& lvl) {
         bids.emplace_back(p, &lvl);
     });
 
@@ -361,4 +375,71 @@ void OrderBook::printBook() const {
         << COLOR_RESET;
 
     LOG_INFO("{}", out.str());
+}
+
+void OrderBook::tradeWorker() {
+    const uint32_t mask = static_cast<uint32_t>(trade_ring_.size() - 1);
+    while (trade_running_.load(std::memory_order_acquire) ||
+           trade_tail_.load(std::memory_order_acquire) != trade_head_.load(std::memory_order_acquire)) {
+        uint32_t tail = trade_tail_.load(std::memory_order_acquire);
+        uint32_t head = trade_head_.load(std::memory_order_acquire);
+        if (tail == head) {
+            std::this_thread::yield();
+            continue;
+        }
+        TradeEvent event = trade_ring_[tail & mask];
+        trade_tail_.store(tail + 1, std::memory_order_release);
+        emitTrade(event);
+    }
+}
+
+void OrderBook::dispatchTrade(const TradeEvent& event) {
+    last_trade_price_.store(event.price, std::memory_order_relaxed);
+    last_trade_qty_.store(event.quantity, std::memory_order_relaxed);
+    const uint32_t mask = static_cast<uint32_t>(trade_ring_.size() - 1);
+    while (true) {
+        uint32_t tail = trade_tail_.load(std::memory_order_acquire);
+        uint32_t head = trade_head_.load(std::memory_order_relaxed);
+        if (head - tail >= trade_ring_.size()) {
+            trade_tail_.store(tail + 1, std::memory_order_release);
+            continue;
+        }
+        trade_ring_[head & mask] = event;
+        trade_head_.store(head + 1, std::memory_order_release);
+        break;
+    }
+}
+
+void OrderBook::setInstrumentToken(InstrumentToken token) {
+    instrument_token_ = token;
+}
+
+InstrumentToken OrderBook::instrument_token() const {
+    return instrument_token_;
+}
+
+void OrderBook::addObserver(const std::shared_ptr<OrderBookObserver>& observer) {
+    if (!observer) return;
+    observers_.push_back(observer);
+}
+
+void OrderBook::snapshot(std::vector<std::pair<Price, Qty>>& bids, std::vector<std::pair<Price, Qty>>& asks) const {
+    bids.clear();
+    asks.clear();
+
+    bids_->forEachConst([&](const Price& price, const PriceLevel& level) {
+        bids.emplace_back(price, level.openQty());
+    });
+
+    asks_->forEachConst([&](const Price& price, const PriceLevel& level) {
+        asks.emplace_back(price, level.openQty());
+    });
+}
+
+Price OrderBook::last_trade_price() const {
+    return last_trade_price_.load(std::memory_order_relaxed);
+}
+
+Qty OrderBook::last_trade_quantity() const {
+    return last_trade_qty_.load(std::memory_order_relaxed);
 }
