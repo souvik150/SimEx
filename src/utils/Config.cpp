@@ -4,6 +4,7 @@
 #include <cctype>
 #include <fstream>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -25,6 +26,34 @@ inline bool startsWith(const std::string& text, char c) {
 }
 
 } // namespace
+
+std::vector<int> parseCpuList(const std::string& spec) {
+    std::vector<int> cpus;
+    size_t start = 0;
+    while (start < spec.size()) {
+        size_t end = spec.find(',', start);
+        if (end == std::string::npos) {
+            end = spec.size();
+        }
+        std::string token = trim(spec.substr(start, end - start));
+        if (!token.empty()) {
+            const auto dash = token.find('-');
+            if (dash == std::string::npos) {
+                cpus.push_back(std::stoi(token));
+            } else {
+                const int begin = std::stoi(token.substr(0, dash));
+                const int finish = std::stoi(token.substr(dash + 1));
+                if (finish >= begin) {
+                    for (int cpu = begin; cpu <= finish; ++cpu) {
+                        cpus.push_back(cpu);
+                    }
+                }
+            }
+        }
+        start = end + 1;
+    }
+    return cpus;
+}
 
 AppConfig loadConfig(const std::string& path) {
     std::ifstream file(path);
@@ -75,6 +104,18 @@ AppConfig loadConfig(const std::string& path) {
         } else if (section == "orderbook") {
             if (key == "use_std_map") {
                 config.use_std_map = (value == "1" || value == "true" || value == "TRUE");
+            }
+        } else if (section == "logging") {
+            if (key == "queue_size") {
+                config.logging.queue_size = static_cast<std::size_t>(std::stoul(value));
+            } else if (key == "worker_threads") {
+                config.logging.worker_threads = static_cast<std::size_t>(std::stoul(value));
+            }
+        } else if (section == "affinity") {
+            if (key == "logging_cores") {
+                config.affinity.logging_cores = parseCpuList(value);
+            } else if (key == "engine_cores") {
+                config.affinity.engine_cores = parseCpuList(value);
             }
         }
     }

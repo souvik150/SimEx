@@ -82,4 +82,7 @@ void OrderDispatcher::handlePayload(std::string_view payload) {
             std::this_thread::yield();
         }
     }
+    if (seen_instruments_.insert(order.instrument).second) {
+        LOG_INFO("Receiving orders for instrument {}", order.instrument);
+    }
 }

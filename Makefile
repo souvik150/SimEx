@@ -8,6 +8,7 @@ TARGET_DEBUG := $(BIN_DIR_DEBUG)/order_matching_system
 GEN_TARGET := $(BIN_DIR)/order_generator
 TEST_TARGET := $(TEST_DIR)/order_book_tests
 BOOK_TARGET := $(BIN_DIR)/book
+BENCH_TARGET := $(BIN_DIR)/add_order_bench
 TOKEN ?= 26000
 
 all: configure build
@@ -79,6 +80,7 @@ help:
 	@echo "  make run          - Run Release binary"
 	@echo "  make run-generator- Run Release order generator"
 	@echo "  make run-book     - Run the FTX-style book UI (TOKEN=<instrument-token>)"
+	@echo "  make run-bench    - Run the addOrder micro-benchmark"
 	@echo "  make run-debug    - Run Debug binary (via gdb if installed)"
 	@echo "  make clean        - Remove build artifacts"
 	@echo "  make rebuild      - Clean, configure, and build (Release)"
@@ -86,3 +88,6 @@ help:
 	@echo "  make help         - Show this help message"
 
 .PHONY: all configure configure-debug build build-debug run run-debug clean rebuild rebuild-debug help
+run-bench: build
+	@echo "Running $(BENCH_TARGET) ..."
+	@$(BENCH_TARGET)

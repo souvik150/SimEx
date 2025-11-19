@@ -217,6 +217,9 @@ int main() {
                 std::this_thread::sleep_for(kMetricsInterval);
                 const uint64_t now = totalSent.load(std::memory_order_relaxed);
                 const uint64_t perSecond = now - lastCount;
+#if !defined(ENABLE_INFO_LOGS)
+                (void)perSecond;
+#endif
                 lastCount = now;
                 LOG_INFO("Throughput: {} orders/s (total {})", perSecond, now);
             }

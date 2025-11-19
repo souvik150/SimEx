@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "boost/lockfree/spsc_queue.hpp"
 #include "ingress/McastSocket.h"
@@ -25,4 +26,5 @@ private:
     SocketUtils::McastSocket& socket_;
     QueueMap queues_;
     std::atomic<bool> running_{true};
+    std::unordered_set<InstrumentToken> seen_instruments_;
 };

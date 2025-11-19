@@ -65,6 +65,7 @@ public:
     std::function<void(McastSocket*)> recv_callback_;
     std::string time_str_;
     std::unordered_set<std::string> joined_groups_;
+    std::string iface_;
 };
 
 McastSocket::McastSocket()
@@ -80,13 +81,44 @@ auto McastSocket::init(const std::string& ip,
                        bool is_listening) -> int {
     const SocketCfg socket_cfg{ip, iface, port, true, is_listening, false};
     impl_->socket_fd_ = createSocket(socket_cfg);
+    impl_->iface_ = iface;
     return impl_->socket_fd_;
 }
 
 bool McastSocket::join(const std::string& ip) {
-    const bool joined = SocketUtils::join(impl_->socket_fd_, ip);
+    bool joined = false;
+    auto attemptJoin = [&](in_addr addr, std::string_view label) {
+        ip_mreq mreq{};
+        mreq.imr_multiaddr.s_addr = inet_addr(ip.c_str());
+        mreq.imr_interface = addr;
+        if (setsockopt(impl_->socket_fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == -1) {
+            LOG_WARN("Failed to join {} on {}: {}", ip, label, strerror(errno));
+            return false;
+        }
+        LOG_INFO("Joined multicast group {} on {}", ip, label);
+        return true;
+    };
+
+    in_addr iface_addr{};
+    bool has_iface = false;
+    if (!impl_->iface_.empty()) {
+        const std::string iface_ip = SocketUtils::getIfaceIP(impl_->iface_);
+        if (!iface_ip.empty()) {
+            iface_addr.s_addr = inet_addr(iface_ip.c_str());
+            has_iface = true;
+        }
+    }
+    if (has_iface) {
+        joined |= attemptJoin(iface_addr, impl_->iface_);
+    }
+    in_addr any_addr{};
+    any_addr.s_addr = htonl(INADDR_ANY);
+    joined |= attemptJoin(any_addr, "INADDR_ANY");
+
     if (joined) {
         impl_->trackJoinedGroup(ip);
+    } else {
+        LOG_ERROR("Failed to join multicast group {} on any interface", ip);
     }
     return joined;
 }

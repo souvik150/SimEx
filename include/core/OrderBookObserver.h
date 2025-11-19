@@ -1,7 +1,7 @@
 #pragma once
 
 class OrderBook;
-struct TradeEvent;
+#include "core/TradeEvent.h"
 
 class OrderBookObserver {
 public:

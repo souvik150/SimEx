@@ -13,6 +13,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 add_compile_definitions(PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
+add_compile_definitions(ENABLE_INFO_LOGS)
 
 include(cmake/CPM.cmake)
 
@@ -54,7 +55,6 @@ add_compile_options(
 )
 
 add_subdirectory(src/utils)
-add_subdirectory(src/strategies)
 add_subdirectory(src/core)
 add_subdirectory(src/ingress)
 add_subdirectory(src/snapshot)
@@ -66,7 +66,7 @@ endif()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
 
 
 
@@ -112,3 +112,11 @@ target_include_directories(book
 target_link_libraries(book
         PRIVATE
         ${CURSES_LIBRARIES})
+
+add_executable(add_order_bench bench/add_order_bench.cpp)
+set_target_properties(add_order_bench
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+target_link_libraries(add_order_bench
+        PRIVATE
+        core)

@@ -1,58 +1,49 @@
-//
-// Created by souvik on 11/8/25.
-//
+#pragma once
 
-#ifndef SIMEX_PRICELEVEL_H
-#define SIMEX_PRICELEVEL_H
-#include <memory>
-#include <unordered_map>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <vector>
 
-#include "Order.h"
+#include "core/OrderArena.h"
 #include "types/OrderRequest.h"
-#include "utils/MemPool.h"
 
-class PriceLevel {
+class alignas(64) PriceLevel {
 public:
-    struct Node {
-        std::unique_ptr<Order> order;
-        Node* next = nullptr;
-        Node* prev = nullptr;
-        explicit Node(std::unique_ptr<Order> o)
-            : order(std::move(o)) {}
-    };
+    static constexpr size_t kInvalidSlot = std::numeric_limits<size_t>::max();
 
-    explicit PriceLevel(MemPool<Node>* pool = nullptr);
-    ~PriceLevel() { clear(); }
+    PriceLevel() = default;
+    PriceLevel(PriceLevel&&) noexcept = default;
+    PriceLevel& operator=(PriceLevel&&) noexcept = default;
 
-    PriceLevel(const PriceLevel&) = delete;
-    PriceLevel& operator=(const PriceLevel&) = delete;
-    PriceLevel(PriceLevel&& other) noexcept;
-    PriceLevel& operator=(PriceLevel&& other) noexcept;
+    size_t addOrder(OrderId orderId, OrderArena& arena);
+    bool removeOrderAt(size_t slot, OrderId orderId, OrderArena& arena);
 
-    void setAllocator(MemPool<Node>* pool) { node_pool_ = pool; }
-
-    void addOrder(std::unique_ptr<Order>&& order);
-    ModifyResult modifyOrder(OrderId order_id, Price new_price, Qty new_qty);
-
-    Order* headOrder();
-    std::unique_ptr<Order> popHead();
-    std::unique_ptr<Order> removeOrder(OrderId order_id);
-    bool empty() const;
-    Qty openQty() const;
-    void print() const;
+    OrderId headOrderId() const;
+    bool empty() const { return count_ == 0; }
+    Qty openQty() const { return open_qty_; }
+    void decOpenQty(Qty qty);
     void clear();
-    void addFill(Qty tradeQty);
-    void decOpenQty(Qty qty) noexcept;
+    void print(const OrderArena& arena) const;
 
 private:
-    Node* head_ = nullptr;
-    Node* tail_ = nullptr;
-    std::unordered_map<uint64_t, Node*> order_map_;
+    static constexpr OrderId kInvalidOrder = std::numeric_limits<OrderId>::max();
+
+    struct Node {
+        OrderId order = kInvalidOrder;
+        size_t next = kInvalidSlot;
+        size_t prev = kInvalidSlot;
+    };
+
+    std::vector<Node> nodes_;
+    size_t head_slot_ = kInvalidSlot;
+    size_t tail_slot_ = kInvalidSlot;
+    size_t free_head_ = kInvalidSlot;
+    size_t count_ = 0;
     Qty open_qty_ = 0;
-    MemPool<Node>* node_pool_ = nullptr;
 
-    Node* createNode(std::unique_ptr<Order>&& order);
-    void releaseNode(Node* node);
+    size_t allocateSlot();
+    void releaseSlot(size_t slot);
+    void resetFreeList();
+    static Qty pendingQty(OrderId orderId, OrderArena& arena);
 };
-
-#endif //SIMEX_PRICELEVEL_H
