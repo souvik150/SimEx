@@ -240,8 +240,7 @@ void OrderBook::restOrderInternal(OrderId orderId) {
             bids_.markLevelNonEmpty(order.price());
         } else if (order.side() == Side::SELL) {
             asks_.markLevelNonEmpty(order.price());
-        }
-    }
+        }    }
 }
 
 void OrderBook::removeRestingOrderInternal(Side restingSide, Price price, PriceLevel& level, OrderId orderId) {
