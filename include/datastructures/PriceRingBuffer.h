@@ -13,6 +13,7 @@
 class alignas(64) PriceRingBuffer {
 public:
     static constexpr size_t kCapacity = 1024;
+    static_assert(kCapacity > 0, "PriceRingBuffer capacity must be greater than zero");
     static_assert((kCapacity & (kCapacity - 1)) == 0, "PriceRingBuffer capacity must be a power of two");
     static constexpr size_t kInvalidSlot = PriceLevel::kInvalidSlot;
 
@@ -62,6 +63,9 @@ private:
     size_t logicalIndex(Price price) const;
     size_t physicalIndex(size_t logical) const;
     size_t slotIndex(Price price) const;
+    bool priceInWindow(Price price) const;
+    void rebalanceWindow(Price focus_price);
+    Price clampBase(Price candidate) const;
     void updateBestCandidate(size_t slotIdx);
     void recomputeBest() const;
     void recomputeBestInternal();
