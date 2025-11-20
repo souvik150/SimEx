@@ -30,4 +30,9 @@ namespace Common {
     }
 }
 
+#define NS_SINCE(start) \
+std::chrono::duration_cast<std::chrono::nanoseconds>( \
+std::chrono::high_resolution_clock::now() - (start) \
+).count()
+
 #endif //ORDERMATCHINGSYSTEM_TIMEUTILS_H

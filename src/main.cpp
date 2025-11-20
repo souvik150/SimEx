@@ -1,120 +1,144 @@
-//
-// Created by souvik on 11/8/25.
-//
-
+#include <atomic>
 #include <chrono>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-#include "core/OrderBookManager.h"
+#include "boost/lockfree/spsc_queue.hpp"
+#include "core/OrderBook.h"
 #include "core/OrderBuilder.h"
-#include "types/OrderType.h"
+#include "ingress/McastSocket.h"
+#include "ingress/OrderDispatcher.h"
+#include "ingress/WireOrder.h"
+#include "snapshot/SnapshotPublisher.h"
+#include "utils/Affinity.h"
+#include "utils/Config.h"
+#include "utils/Logger.h"
 #include "utils/LogMacros.h"
+
+namespace {
+#ifdef PROJECT_ROOT
+constexpr const char* kConfigPath = PROJECT_ROOT "/config/app.ini";
+#else
+constexpr const char* kConfigPath = "config/app.ini";
+#endif
+
+using WireOrder = ingress::WireOrder;
+using Queue = boost::lockfree::spsc_queue<WireOrder>;
+constexpr std::size_t kQueueCapacity = 10240;
+}  // namespace
 
 int main() {
     try {
-        OrderBookManager books;
-        auto timeCursor = std::chrono::high_resolution_clock::now();
-        OrderId nextId = 1;
+        const AppConfig config = loadConfig(kConfigPath);
+        logging::LoggerOptions logger_opts;
+        logger_opts.queue_size = config.logging.queue_size;
+        logger_opts.worker_threads = config.logging.worker_threads;
+        logger_opts.affinity = config.affinity.logging_cores;
+        logging::configureLogger(logger_opts);
+        const std::vector<InstrumentToken> instruments = {26000, 35000};
 
-        constexpr InstrumentToken niftyToken = 26000;
-        constexpr InstrumentToken bankToken = 35000;
+        std::unordered_map<InstrumentToken, std::unique_ptr<Queue>> queue_storage;
+        OrderDispatcher::QueueMap dispatcher_queues;
+        std::unordered_map<InstrumentToken, std::unique_ptr<OrderBook>> books;
 
-        auto submitOrder = [&](InstrumentToken token, Side side, Price price, Qty qty, OrderType type, Qty display = 0) -> OrderId {
-            OrderBuilder builder;
-            builder.setOrderId(nextId++)
-                   .setInstrumentToken(token)
-                   .setSide(side)
-                   .setPrice(price)
-                   .setQuantity(qty)
-                   .setOrderType(type)
-                   .setTimestamp(timeCursor);
-            if (display > 0)
-                builder.setDisplayQuantity(display);
+        SnapshotConfig snapshot_cfg;
+        snapshot_cfg.shm_prefix = config.snapshot.shm_prefix;
+        snapshot_cfg.interval = std::chrono::milliseconds(config.snapshot.interval_ms);
+        snapshot_cfg.max_levels = config.snapshot.levels;
+        SnapshotPublisher publisher(snapshot_cfg, instruments);
 
-            auto order = builder.build();
-            LOG_INFO("→ new order for token {}", token);
-            order->print();
-            books.addOrder(std::move(order));
-            if (auto* book = books.findBook(token)) {
-                LOG_INFO("Current book for token {}", token);
-                book->printBook();
+        const auto& engineCores = config.affinity.engine_cores;
+        size_t nextEngineCore = 0;
+
+        for (const auto token : instruments) {
+            auto queue = std::make_unique<Queue>(kQueueCapacity);
+            dispatcher_queues[token] = queue.get();
+            queue_storage[token] = std::move(queue);
+            books[token] = std::make_unique<OrderBook>(config.use_std_map);
+            books[token]->setInstrumentToken(token);
+            if (!engineCores.empty()) {
+                const int tradeCore = engineCores[nextEngineCore % engineCores.size()];
+                ++nextEngineCore;
+                books[token]->bindTradeThreadToCores(std::vector<int>{tradeCore});
             }
-            timeCursor += std::chrono::nanoseconds(1);
-            return nextId - 1;
-        };
-
-        auto submitNifty = [&](Side side, Price price, Qty qty, OrderType type, Qty display = 0) {
-            return submitOrder(niftyToken, side, price, qty, type, display);
-        };
-
-        LOG_INFO("\nSeeding resting limit liquidity");
-        submitNifty(Side::BUY, 1000, 8, OrderType::LIMIT);
-        submitNifty(Side::BUY, 995, 6, OrderType::LIMIT);
-        submitNifty(Side::SELL, 1005, 7, OrderType::LIMIT);
-        submitNifty(Side::SELL, 1010, 5, OrderType::LIMIT);
-
-        LOG_INFO("\nMarket order sweeps asks");
-        submitNifty(Side::BUY, 0, 12, OrderType::MARKET);
-
-        LOG_INFO("\nRebuilding asks for IOC demo");
-        submitNifty(Side::SELL, 1004, 4, OrderType::LIMIT);
-        submitNifty(Side::SELL, 1006, 5, OrderType::LIMIT);
-
-        LOG_INFO("\nIOC order matches depth and cancels remainder");
-        submitNifty(Side::BUY, 1006, 6, OrderType::IOC);
-        LOG_INFO("\nIOC priced away cancels immediately");
-        submitNifty(Side::BUY, 1000, 4, OrderType::IOC);
-
-        LOG_INFO("\nPreparing depth for FOK scenario");
-        submitNifty(Side::SELL, 1005, 2, OrderType::LIMIT);
-        submitNifty(Side::SELL, 1005, 2, OrderType::LIMIT);
-
-        LOG_INFO("\nFOK succeeds when full size is available");
-        submitNifty(Side::BUY, 1006, 7, OrderType::FOK);
-
-        LOG_INFO("\nFOK fails when liquidity is insufficient");
-        submitNifty(Side::SELL, 1008, 3, OrderType::LIMIT);
-        submitNifty(Side::BUY, 1006, 5, OrderType::FOK);
-
-        LOG_INFO("\nIceberg order exposes clips and refreshes");
-        submitNifty(Side::SELL, 1002, 12, OrderType::ICEBERG, 4);
-        submitNifty(Side::BUY, 1002, 4, OrderType::LIMIT);
-        submitNifty(Side::BUY, 1002, 4, OrderType::LIMIT);
-        submitNifty(Side::BUY, 1002, 4, OrderType::LIMIT);
-
-        LOG_INFO("\n✏Demonstrating modify & cancel on resting orders");
-        const OrderId modTarget = submitNifty(Side::BUY, 998, 6, OrderType::LIMIT);
-        LOG_INFO("Modifying order {} -> px=1001 qty=9", modTarget);
-        books.modifyOrder(niftyToken, modTarget, 1001, 9);
-        if (auto* book = books.findBook(niftyToken)) {
-            book->printBook();
         }
 
-        const OrderId cancelTarget = submitNifty(Side::SELL, 1009, 5, OrderType::LIMIT);
-        LOG_INFO("Cancelling order {}", cancelTarget);
-        if (books.cancelOrder(niftyToken, cancelTarget))
-            LOG_INFO("Order {} cancelled", cancelTarget);
-        else
-            LOG_WARN("Failed to cancel order {}", cancelTarget);
-        if (auto* book = books.findBook(niftyToken)) {
-            book->printBook();
+        std::vector<std::thread> workers;
+        workers.reserve(instruments.size());
+
+        for (std::size_t idx = 0; idx < instruments.size(); ++idx) {
+            const InstrumentToken token = instruments[idx];
+            Queue* queue = dispatcher_queues[token];
+            OrderBook* book = books[token].get();
+
+            int workerCore = -1;
+            if (!engineCores.empty()) {
+                workerCore = engineCores[nextEngineCore % engineCores.size()];
+                ++nextEngineCore;
+            }
+
+            workers.emplace_back([queue, book, token, &publisher, workerCore] {
+                if (workerCore >= 0) {
+                    cpu::setCurrentThreadAffinity(std::vector<int>{workerCore});
+                }
+                while (true) {
+                    WireOrder inbound;
+                    std::size_t spins = 0;
+                    while (!queue->pop(inbound)) {
+                        if (++spins % 1000 == 0) {
+                            std::this_thread::yield();
+                        }
+                    }
+
+                    OrderBuilder builder;
+                    builder.setOrderId(inbound.order_id)
+                        .setInstrumentToken(inbound.instrument)
+                        .setSide(inbound.side)
+                        .setPrice(inbound.price)
+                        .setQuantity(inbound.quantity)
+                        .setOrderType(inbound.type)
+                        .setTimestamp(std::chrono::high_resolution_clock::now());
+
+                    if (inbound.display > 0) {
+                        builder.setDisplayQuantity(inbound.display);
+                    }
+
+                    auto order = builder.build();
+
+                    book->addOrder(std::move(order));
+                    publisher.maybePublish(token, *book);
+                }
+            });
+            if (workerCore >= 0) {
+                cpu::setThreadAffinity(workers.back(), workerCore);
+            }
         }
 
-        LOG_INFO("\nAdding flows for a second instrument");
-        submitOrder(bankToken, Side::BUY, 2050, 10, OrderType::LIMIT);
-        submitOrder(bankToken, Side::SELL, 2055, 7, OrderType::LIMIT);
-        submitOrder(bankToken, Side::BUY, 2055, 4, OrderType::LIMIT);
+        SocketUtils::McastSocket socket;
+        socket.init(config.mcast_ip, config.mcast_iface, config.mcast_port, true);
+        socket.join(config.mcast_ip);
 
-        LOG_INFO("\n📘 Final book state:");
-        if (auto* book = books.findBook(niftyToken)) {
-            LOG_INFO("Nifty book:");
-            book->printBook();
-        }
-        if (auto* book = books.findBook(bankToken)) {
-            LOG_INFO("Bank book:");
-            book->printBook();
+        OrderDispatcher dispatcher(socket, dispatcher_queues);
+        std::thread dispatcher_thread([&dispatcher] {
+            dispatcher.run();
+        });
+
+        LOG_INFO("Engine ready on {}:{} via iface {} (orderbook backend: {})",
+                 config.mcast_ip,
+                 config.mcast_port,
+                 config.mcast_iface,
+                 config.use_std_map ? "std::pmr::map" : "RingBuffer");
+
+        std::atomic<bool> running{true};
+
+        dispatcher_thread.join();
+        running.store(false, std::memory_order_relaxed);
+        for (auto& worker : workers) {
+            worker.join();
         }
     } catch (const std::exception& ex) {
-        LOG_ERROR("Unhandled exception: {}", ex.what());
+        LOG_ERROR("Engine crashed: {}", ex.what());
         return 1;
     }
 
