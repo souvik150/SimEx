@@ -28,6 +28,13 @@ inline const char* trimPath(const char* file) {
 
 #define LOG_TRACE(fmt, ...) LOG_AT_LEVEL(spdlog::level::trace, fmt, ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...) LOG_AT_LEVEL(spdlog::level::debug, fmt, ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...)  LOG_AT_LEVEL(spdlog::level::info,  fmt, ##__VA_ARGS__)
+
+#if defined(ENABLE_INFO_LOGS)
+#define LOG_INFO(fmt, ...) LOG_AT_LEVEL(spdlog::level::info, fmt, ##__VA_ARGS__)
+#else
+#define LOG_INFO(...) ((void)0)
+#endif
+
+#define LOG_TIME(fmt, ...) LOG_AT_LEVEL(spdlog::level::info, fmt, ##__VA_ARGS__)
 #define LOG_WARN(fmt, ...)  LOG_AT_LEVEL(spdlog::level::warn,  fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) LOG_AT_LEVEL(spdlog::level::err,   fmt, ##__VA_ARGS__)

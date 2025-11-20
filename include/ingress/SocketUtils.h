@@ -107,6 +107,7 @@ namespace SocketUtils {
   /// Create a TCP / UDP socket to either connect to or listen for data on or listen for connections on the specified interface and IP:port information.
   [[nodiscard]] inline auto createSocket(const SocketCfg& socket_cfg) -> int {
     const auto ip = socket_cfg.ip_.empty() ? getIfaceIP(socket_cfg.iface_) : socket_cfg.ip_;
+    const auto iface_ip = socket_cfg.iface_.empty() ? std::string{} : getIfaceIP(socket_cfg.iface_);
     LOG_INFO("Creating socket with cfg: {}", socket_cfg.toString());
 
     // AI_NUMERICHOST -> The host string is a numeric address (e.g. 192.168.0.5, 239.192.1.1), not a hostname. Don’t do DNS resolution.
@@ -139,7 +140,7 @@ namespace SocketUtils {
       }
 
       if (!socket_cfg.is_listening_) {
-        ASSERT(connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != 1, "connect() failed. errno:" + std::string(strerror(errno)));
+        ASSERT(connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != -1, "connect() failed. errno:" + std::string(strerror(errno)));
       }
 
       if (socket_cfg.is_listening_) {
@@ -153,6 +154,16 @@ namespace SocketUtils {
 
       if (!socket_cfg.is_udp_ && socket_cfg.is_listening_) { // listen for incoming TCP connections.
         ASSERT(listen(socket_fd, MaxTCPServerBacklog) == 0, "listen() failed. errno:" + std::string(strerror(errno)));
+      }
+
+      if (socket_cfg.is_udp_ && !socket_cfg.is_listening_ && !iface_ip.empty()) {
+        in_addr local_if{};
+        local_if.s_addr = inet_addr(iface_ip.c_str());
+        ASSERT(setsockopt(socket_fd, IPPROTO_IP, IP_MULTICAST_IF, &local_if, sizeof(local_if)) == 0,
+               "setsockopt() IP_MULTICAST_IF failed. errno:" + std::string(strerror(errno)));
+        unsigned char loop = 1;
+        ASSERT(setsockopt(socket_fd, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) == 0,
+               "setsockopt() IP_MULTICAST_LOOP failed. errno:" + std::string(strerror(errno)));
       }
 
       if (socket_cfg.needs_so_timestamp_) { // enable software receive timestamps.

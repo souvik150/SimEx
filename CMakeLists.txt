@@ -8,9 +8,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
 add_compile_definitions(PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
+add_compile_definitions(ENABLE_INFO_LOGS)
 
 include(cmake/CPM.cmake)
+
+find_package(Curses REQUIRED)
 
 set(_spdlog_local "${CMAKE_SOURCE_DIR}/external/spdlog")
 if (EXISTS "${_spdlog_local}/CMakeLists.txt")
@@ -47,9 +54,10 @@ add_compile_options(
         -Wcast-align
 )
 
-add_subdirectory(src/core)
-add_subdirectory(src/strategies)
 add_subdirectory(src/utils)
+add_subdirectory(src/core)
+add_subdirectory(src/ingress)
+add_subdirectory(src/snapshot)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose Release or Debug" FORCE)
@@ -58,7 +66,7 @@ endif()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native")
 
 
 
@@ -71,6 +79,8 @@ set_target_properties(order_matching_system
 target_link_libraries(order_matching_system
         PRIVATE
         core
+        ingress
+        snapshot
 )
 
 add_executable(order_book_tests tests/OrderBookTest.cpp)
@@ -81,3 +91,32 @@ target_link_libraries(order_book_tests
         PRIVATE
         core
 )
+
+add_executable(order_generator generator/main.cpp)
+set_target_properties(order_generator
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+target_link_libraries(order_generator
+        PRIVATE
+        utils
+        ingress
+)
+
+add_executable(book src/book.cpp)
+set_target_properties(book
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+target_include_directories(book
+        PRIVATE
+        ${CURSES_INCLUDE_DIR})
+target_link_libraries(book
+        PRIVATE
+        ${CURSES_LIBRARIES})
+
+add_executable(add_order_bench bench/add_order_bench.cpp)
+set_target_properties(add_order_bench
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+target_link_libraries(add_order_bench
+        PRIVATE
+        core)

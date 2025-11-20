@@ -1,181 +1,158 @@
-//
-// Created by souvik on 11/8/25.
-//
-
 #include "core/PriceLevel.h"
 
+#include <algorithm>
 #include <sstream>
-#include <stdexcept>
 
 #include "utils/LogMacros.h"
 
-PriceLevel::PriceLevel(MemPool<Node>* pool)
-    : node_pool_(pool) {}
+size_t PriceLevel::addOrder(OrderId orderId, OrderArena& arena) {
+    const size_t slot = allocateSlot();
+    auto& node = nodes_[slot];
 
-PriceLevel::PriceLevel(PriceLevel&& other) noexcept {
-    head_ = other.head_;
-    tail_ = other.tail_;
-    order_map_ = std::move(other.order_map_);
-    open_qty_ = other.open_qty_;
-    node_pool_ = other.node_pool_;
+    node.order = orderId;
+    node.prev = tail_slot_;
+    node.next = kInvalidSlot;
 
-    other.head_ = nullptr;
-    other.tail_ = nullptr;
-    other.open_qty_ = 0;
-    other.node_pool_ = nullptr;
-    other.order_map_.clear();
+    if (tail_slot_ != kInvalidSlot) {
+        nodes_[tail_slot_].next = slot;
+    } else {
+        head_slot_ = slot;
+    }
+    tail_slot_ = slot;
+
+    ++count_;
+    open_qty_ += pendingQty(orderId, arena);
+    return slot;
 }
 
-PriceLevel& PriceLevel::operator=(PriceLevel&& other) noexcept {
-    if (this == &other) {
-        return *this;
+bool PriceLevel::removeOrderAt(size_t slot, OrderId orderId, OrderArena& arena) {
+    if (slot >= nodes_.size()) {
+        return false;
+    }
+    auto& node = nodes_[slot];
+    if (node.order != orderId) {
+        return false;
     }
 
-    clear();
+    const Qty pending = pendingQty(orderId, arena);
+    if (pending >= open_qty_) {
+        open_qty_ = 0;
+    } else {
+        open_qty_ -= pending;
+    }
 
-    head_ = other.head_;
-    tail_ = other.tail_;
-    order_map_ = std::move(other.order_map_);
-    open_qty_ = other.open_qty_;
-    node_pool_ = other.node_pool_;
+    if (node.prev != kInvalidSlot) {
+        nodes_[node.prev].next = node.next;
+    } else {
+        head_slot_ = node.next;
+    }
+    if (node.next != kInvalidSlot) {
+        nodes_[node.next].prev = node.prev;
+    } else {
+        tail_slot_ = node.prev;
+    }
 
-    other.head_ = nullptr;
-    other.tail_ = nullptr;
-    other.open_qty_ = 0;
-    other.node_pool_ = nullptr;
-    other.order_map_.clear();
+    releaseSlot(slot);
 
-    return *this;
+    if (count_ > 0) {
+        --count_;
+    }
+    if (count_ == 0) {
+        head_slot_ = tail_slot_ = kInvalidSlot;
+    }
+
+    return true;
 }
 
-PriceLevel::Node* PriceLevel::createNode(std::unique_ptr<Order>&& order) {
-    if (!node_pool_)
-        throw std::runtime_error("PriceLevel allocator not set");
-    return node_pool_->allocate(std::move(order));
+OrderId PriceLevel::headOrderId() const {
+    if (head_slot_ == kInvalidSlot) {
+        return kInvalidOrder;
+    }
+    return nodes_[head_slot_].order;
 }
 
-void PriceLevel::releaseNode(Node* node) {
-    if (!node_pool_)
-        delete node;
-    else
-        node_pool_->deallocate(node);
-}
-
-void PriceLevel::addOrder(std::unique_ptr<Order>&& order) {
-    const uint64_t id = order->orderId();
-    const Qty pending = order->pending_quantity();
-    Node* node = createNode(std::move(order));
-    order_map_[id] = node;
-    open_qty_ += pending;
-
-    if (!head_) { head_ = tail_ = node; }
-    else {
-        tail_->next = node;
-        node->prev = tail_;
-        tail_ = node;
+void PriceLevel::decOpenQty(Qty qty) {
+    if (qty >= open_qty_) {
+        open_qty_ = 0;
+    } else {
+        open_qty_ -= qty;
     }
 }
 
-ModifyResult PriceLevel::modifyOrder(OrderId order_id, Price new_price, Qty new_qty) {
-    const auto it = order_map_.find(order_id);
-    if (it == order_map_.end())
-        return NotFound;
-
-    const Node* node = it->second;
-    auto& originalOrder = *node->order;
-
-
-    if (new_price != originalOrder.price())
-        return NeedsReinsert;
-
-    if (new_qty > originalOrder.quantity()) {
-        return NeedsReinsert;
+void PriceLevel::clear() {
+    if (!nodes_.empty()) {
+        resetFreeList();
+    } else {
+        free_head_ = kInvalidSlot;
     }
-
-    if (new_qty < originalOrder.quantity()) {
-        if (bool result = originalOrder.modifyQty(new_qty); !result) {
-            return Invalid;
-        }
-        return ModifyInPlace;
-    }
-
-    return Invalid;
+    head_slot_ = tail_slot_ = kInvalidSlot;
+    count_ = 0;
+    open_qty_ = 0;
 }
 
- Order* PriceLevel::headOrder() {
-    return head_ ? head_->order.get() : nullptr;
-}
-
-std::unique_ptr<Order> PriceLevel::popHead() {
-    if (!head_) return nullptr;
-    Node* node = head_;
-    head_ = node->next;
-    if (head_) head_->prev = nullptr;
-    else tail_ = nullptr;
-
-    const Qty pending = node->order->pending_quantity();
-    decOpenQty(pending);
-    auto order = std::move(node->order);
-    order_map_.erase(order->orderId());
-    releaseNode(node);
-    return order;
-}
-
-std::unique_ptr<Order> PriceLevel::removeOrder(OrderId order_id) {
-    const auto it = order_map_.find(order_id);
-    if (it == order_map_.end()) return nullptr;
-
-    Node* node = it->second;
-    order_map_.erase(it);
-    const Qty pending = node->order->pending_quantity();
-    decOpenQty(pending);
-
-    if (node->prev) node->prev->next = node->next;
-    else head_ = node->next;
-    if (node->next) node->next->prev = node->prev;
-    else tail_ = node->prev;
-
-    std::unique_ptr<Order> order = std::move(node->order);
-    releaseNode(node);
-    return order;
-}
-
-bool PriceLevel::empty() const { return !head_; }
-Qty PriceLevel::openQty() const { return open_qty_; }
-
-void PriceLevel::print() const {
+void PriceLevel::print(const OrderArena& arena) const {
     std::ostringstream out;
-    const Node* n = head_;
     out << "[";
-    while (n) {
-        out << n->order->orderId() << "(" << n->order->quantity() << ")";
-        if (n->next) out << " -> ";
-        n = n->next;
+    if (head_slot_ != kInvalidSlot && count_ > 0) {
+        size_t idx = head_slot_;
+        size_t printed = 0;
+        while (idx != kInvalidSlot && printed < count_) {
+            const OrderId id = nodes_[idx].order;
+            const Order* ord = arena.find(id);
+            if (ord) {
+                out << ord->orderId() << "(" << ord->pending_quantity() << ")";
+            } else {
+                out << id << "(?)";
+            }
+            ++printed;
+            idx = nodes_[idx].next;
+            if (idx != kInvalidSlot && printed < count_) {
+                out << " -> ";
+            }
+        }
     }
     out << "]";
     LOG_INFO("{}", out.str());
 }
 
-void PriceLevel::clear() {
-    Node* n = head_;
-    while (n) {
-        Node* tmp = n->next;
-        releaseNode(n);
-        n = tmp;
-    }
-    order_map_.clear();
-    head_ = tail_ = nullptr;
-    open_qty_ = 0;
+Qty PriceLevel::pendingQty(OrderId orderId, OrderArena& arena) {
+    Order& order = arena.require(orderId);
+    return order.pending_quantity();
 }
 
-void PriceLevel::addFill(Qty tradeQty) {
-    if (auto* o = headOrder()) {
-        o->addFill(tradeQty);
-        decOpenQty(tradeQty);
+size_t PriceLevel::allocateSlot() {
+    if (free_head_ != kInvalidSlot) {
+        const size_t slot = free_head_;
+        free_head_ = nodes_[slot].next;
+        nodes_[slot].order = kInvalidOrder;
+        nodes_[slot].prev = kInvalidSlot;
+        nodes_[slot].next = kInvalidSlot;
+        return slot;
     }
+    const size_t slot = nodes_.size();
+    nodes_.push_back(Node{});
+    return slot;
 }
 
-void PriceLevel::decOpenQty(Qty qty) noexcept {
-    if (qty > open_qty_) qty = open_qty_;
-    open_qty_ -= qty;
+void PriceLevel::releaseSlot(size_t slot) {
+    if (slot >= nodes_.size()) {
+        return;
+    }
+    nodes_[slot].order = kInvalidOrder;
+    nodes_[slot].prev = kInvalidSlot;
+    nodes_[slot].next = free_head_;
+    free_head_ = slot;
+}
+
+void PriceLevel::resetFreeList() {
+    if (nodes_.empty()) {
+        free_head_ = kInvalidSlot;
+        return;
+    }
+    free_head_ = 0;
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        nodes_[i].order = kInvalidOrder;
+        nodes_[i].prev = kInvalidSlot;
+        nodes_[i].next = (i + 1 < nodes_.size()) ? i + 1 : kInvalidSlot;
+    }
 }

@@ -4,6 +4,7 @@
 
 #ifndef ORDERMATCHINGSYSTEM_MCAST_SOCKET_H
 #define ORDERMATCHINGSYSTEM_MCAST_SOCKET_H
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <vector>
