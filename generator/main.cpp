@@ -6,8 +6,11 @@
 #include <csignal>
 #include <cctype>
 #include <cstdio>
+#include <iostream>
 #include <fstream>
+#include <optional>
 #include <random>
+#include <stdexcept>
 #include <thread>
 #include <string>
 #include <vector>
@@ -61,14 +64,21 @@ std::string trim(const std::string& input) {
 struct GeneratorSettings {
     double orders_per_second;
     int threads;
+    double buy_only_seconds;
+};
+
+struct CliOptions {
+    std::optional<double> orders_per_second;
+    std::optional<Side> forced_side;
 };
 
 GeneratorSettings loadGeneratorSettings(const std::string& path,
                                         double defaultRate,
-                                        int defaultThreads) {
+                                        int defaultThreads,
+                                        double defaultBuyOnlySeconds) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        return {defaultRate, defaultThreads};
+        return {defaultRate, defaultThreads, defaultBuyOnlySeconds};
     }
 
     bool inGeneratorSection = false;
@@ -97,13 +107,70 @@ GeneratorSettings loadGeneratorSettings(const std::string& path,
                 defaultRate = std::max(0.0, std::stod(value));
             } else if (key == "threads") {
                 defaultThreads = std::max(1, std::stoi(value));
+            } else if (key == "buy_only_seconds") {
+                defaultBuyOnlySeconds = std::max(0.0, std::stod(value));
             }
         } catch (const std::exception&) {
             continue;
         }
     }
 
-    return {defaultRate, defaultThreads};
+    return {defaultRate, defaultThreads, defaultBuyOnlySeconds};
+}
+
+std::optional<Side> parseSideValue(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    if (value == "BUY") return Side::BUY;
+    if (value == "SELL") return Side::SELL;
+    return std::nullopt;
+}
+
+CliOptions parseCommandLine(int argc, char** argv) {
+    CliOptions opts;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        const auto parseDouble = [&](const std::string& text, double& out) {
+            try {
+                out = std::stod(text);
+                return true;
+            } catch (const std::exception&) {
+                return false;
+            }
+        };
+        const auto parseSideOpt = [&](const std::string& text) {
+            auto maybeSide = parseSideValue(text);
+            if (!maybeSide) {
+                throw std::invalid_argument("Invalid side '" + text + "', expected BUY or SELL");
+            }
+            opts.forced_side = maybeSide;
+        };
+
+        if (arg.rfind("--orders-per-second=", 0) == 0) {
+            double value = 0.0;
+            if (!parseDouble(arg.substr(21), value) || value < 0.0) {
+                throw std::invalid_argument("Invalid value for --orders-per-second");
+            }
+            opts.orders_per_second = value;
+        } else if (arg.rfind("--ops=", 0) == 0) {
+            double value = 0.0;
+            if (!parseDouble(arg.substr(6), value) || value < 0.0) {
+                throw std::invalid_argument("Invalid value for --ops");
+            }
+            opts.orders_per_second = value;
+        } else if (arg.rfind("--force-side=", 0) == 0) {
+            parseSideOpt(arg.substr(13));
+        } else if (arg.rfind("--side=", 0) == 0) {
+            parseSideOpt(arg.substr(7));
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: order_generator [--orders-per-second=N] [--force-side=BUY|SELL]\n";
+            std::exit(0);
+        } else {
+            throw std::invalid_argument("Unknown argument: " + arg);
+        }
+    }
+    return opts;
 }
 
 size_t serializeOrder(const ingress::WireOrder& order, std::array<char, 128>& buffer) {
@@ -128,17 +195,20 @@ size_t serializeOrder(const ingress::WireOrder& order, std::array<char, 128>& bu
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        const CliOptions cli = parseCommandLine(argc, argv);
         std::signal(SIGINT, handleSignal);
         std::signal(SIGTERM, handleSignal);
 
         const AppConfig config = loadConfig(kConfigPath);
         const unsigned hwThreads = std::thread::hardware_concurrency();
         const int defaultThreads = static_cast<int>(hwThreads > 0 ? hwThreads : 1u);
-        const auto settings = loadGeneratorSettings(kConfigPath, 200.0, defaultThreads);
-        const double configuredRate = settings.orders_per_second;
+        const auto settings = loadGeneratorSettings(kConfigPath, 200.0, defaultThreads, 0.0);
+        const double configuredRate = cli.orders_per_second.value_or(settings.orders_per_second);
         const int workerCount = settings.threads;
+        const auto buyOnlyDuration = std::chrono::duration<double>(settings.buy_only_seconds);
+        const std::optional<Side> forcedSide = cli.forced_side;
         const double perThreadRate = (configuredRate <= 0.0)
             ? 0.0
             : (configuredRate / static_cast<double>(workerCount));
@@ -163,13 +233,25 @@ int main() {
             std::normal_distribution<double> returns_dist(0.0, kSigma);
             std::uniform_int_distribution<int> qty_dist(kMinQty, kMaxQty);
             std::bernoulli_distribution side_dist(0.5);
+            const bool warmupEnabled = !forcedSide.has_value() && settings.buy_only_seconds > 0.0;
+            const Clock::time_point buyOnlyUntil = warmupEnabled
+                ? Clock::now() + std::chrono::duration_cast<Clock::duration>(buyOnlyDuration)
+                : Clock::time_point::min();
 
             while (gRunning.load(std::memory_order_relaxed)) {
                 const double pct_move = clampDeviation(returns_dist(rng));
                 const double priceValue = kClosingPrice * std::exp(pct_move);
                 const Price price = static_cast<Price>(std::llround(std::max(priceValue, 1.0)));
                 const Qty quantity = static_cast<Qty>(qty_dist(rng));
-                const Side side = side_dist(rng) ? Side::BUY : Side::SELL;
+                Side side = Side::BUY;
+                if (forcedSide.has_value()) {
+                    side = *forcedSide;
+                } else if (buyOnlyUntil != Clock::time_point::min() &&
+                           Clock::now() < buyOnlyUntil) {
+                    side = Side::BUY;
+                } else {
+                    side = side_dist(rng) ? Side::BUY : Side::SELL;
+                }
 
                 ingress::WireOrder order{
                     nextId.fetch_add(1, std::memory_order_relaxed),
@@ -205,11 +287,16 @@ int main() {
             workers.emplace_back(workerFn, i);
         }
 
-        LOG_INFO("Generator running for RELIANCE (token {}) | target {:.0f} orders/s | threads {} | {} mode",
+        const char* forcedSideText = forcedSide
+            ? (*forcedSide == Side::BUY ? "BUY" : "SELL")
+            : "mixed";
+        LOG_INFO("Generator running for RELIANCE (token {}) | target {:.0f} orders/s | threads {} | {} mode | flow {} | buy-only phase {:.1f}s",
                  kInstrumentToken,
                  configuredRate,
                  workerCount,
-                 rateLimited ? "rate-limited" : "unbounded");
+                 rateLimited ? "rate-limited" : "unbounded",
+                 forcedSideText,
+                 settings.buy_only_seconds);
 
         std::thread metrics([&] {
             uint64_t lastCount = 0;

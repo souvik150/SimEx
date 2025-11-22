@@ -102,6 +102,16 @@ target_link_libraries(order_generator
         ingress
 )
 
+add_executable(order_sending_cli order_sending_cli.cpp)
+set_target_properties(order_sending_cli
+        PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+target_link_libraries(order_sending_cli
+        PRIVATE
+        utils
+        ingress
+)
+
 add_executable(book src/book.cpp)
 set_target_properties(book
         PROPERTIES
