@@ -6,6 +6,7 @@ TEST_DIR := $(BUILD_DIR)/tests
 TARGET := $(BIN_DIR)/order_matching_system
 TARGET_DEBUG := $(BIN_DIR_DEBUG)/order_matching_system
 GEN_TARGET := $(BIN_DIR)/order_generator
+CLI_TARGET := $(BIN_DIR)/order_sending_cli
 TEST_TARGET := $(TEST_DIR)/order_book_tests
 BOOK_TARGET := $(BIN_DIR)/book
 BENCH_TARGET := $(BIN_DIR)/add_order_bench
@@ -35,8 +36,19 @@ run: build
 	@$(TARGET)
 
 run-generator: build
-	@echo "Running $(GEN_TARGET) (Release)..."
-	@$(GEN_TARGET)
+	@CMD="$(GEN_TARGET)"; \
+	if [ -n "$(OPS)" ]; then \
+		CMD="$$CMD --orders-per-second=$(OPS)"; \
+	fi; \
+	if [ -n "$(SIDE)" ]; then \
+		CMD="$$CMD --force-side=$(SIDE)"; \
+	fi; \
+	echo "Running $$CMD (Release)..."; \
+	$$CMD
+
+run-cli: build
+	@echo "Running $(CLI_TARGET) (Release)..."
+	@$(CLI_TARGET)
 
 run-book: build
 	@if [ -z "$(TOKEN)" ]; then \
@@ -78,7 +90,8 @@ help:
 	@echo "  make build        - Build Release binary"
 	@echo "  make build-debug  - Build Debug binary"
 	@echo "  make run          - Run Release binary"
-	@echo "  make run-generator- Run Release order generator"
+	@echo "  make run-generator- Run Release order generator (SIDE=BUY|SELL OPS=<orders/sec>)"
+	@echo "  make run-cli      - Run manual order sending CLI"
 	@echo "  make run-book     - Run the FTX-style book UI (TOKEN=<instrument-token>)"
 	@echo "  make run-bench    - Run the addOrder micro-benchmark"
 	@echo "  make run-debug    - Run Debug binary (via gdb if installed)"
@@ -87,7 +100,7 @@ help:
 	@echo "  make rebuild-debug - Clean, configure, and build (Debug)"
 	@echo "  make help         - Show this help message"
 
-.PHONY: all configure configure-debug build build-debug run run-debug clean rebuild rebuild-debug help
+.PHONY: all configure configure-debug build build-debug run run-cli run-debug clean rebuild rebuild-debug help
 run-bench: build
 	@echo "Running $(BENCH_TARGET) ..."
 	@$(BENCH_TARGET)

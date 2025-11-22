@@ -136,7 +136,7 @@ bool readSharedSnapshot(SharedSnapshotReader& reader,
     snapshot.token = token;
     snapshot.instrument = "Token " + std::to_string(token);
     snapshot.timestamp = formatTimestamp(reader.ptr->timestamp_ns);
-    snapshot.ltp = reader.ptr->ltp;
+    snapshot.ltp = reader.ptr->ltp / 100.0;
     snapshot.ltq = reader.ptr->ltq;
     snapshot.bids.clear();
     snapshot.asks.clear();
@@ -146,10 +146,10 @@ bool readSharedSnapshot(SharedSnapshotReader& reader,
     const snapshot::Level* bidSrc = snapshot::bidLevels(reader.ptr);
     const snapshot::Level* askSrc = snapshot::askLevels(reader.ptr);
     for (uint32_t i = 0; i < bidCount; ++i) {
-        snapshot.bids.push_back({bidSrc[i].price, bidSrc[i].qty});
+        snapshot.bids.push_back({bidSrc[i].price / 100.0, bidSrc[i].qty});
     }
     for (uint32_t i = 0; i < askCount; ++i) {
-        snapshot.asks.push_back({askSrc[i].price, askSrc[i].qty});
+        snapshot.asks.push_back({askSrc[i].price / 100.0, askSrc[i].qty});
     }
     return true;
 }
